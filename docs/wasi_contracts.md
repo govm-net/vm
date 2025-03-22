@@ -48,7 +48,7 @@ func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
 // Transfer 在账户之间转移代币
 func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
     // 获取发送方余额对象
-    fromBalance, err := ctx.GetObjectWithOwner( ctx.Sender())
+    fromBalance, err := ctx.GetObjectWithOwner(ctx.Sender())
     if err != nil {
         return fmt.Errorf("failed to get sender balance: %w", err)
     }
@@ -99,12 +99,13 @@ func GetBalance(ctx vm.Context, balanceID vm.ObjectID) (uint64, error) {
     }
 
     // 读取余额
-    amount, err := balanceObj.Get("amount")
+    var amount uint64
+    err := balanceObj.Get("amount",&amount)
     if err != nil {
         return 0, fmt.Errorf("failed to get amount: %w", err)
     }
 
-    return amount.(uint64), nil
+    return amount, nil
 }
 
 // CreateAccount 为新用户创建账户
@@ -151,13 +152,8 @@ contractAddr, _ := engine.DeployWithOptions(code, deployOptions)
 initResult, _ := engine.ExecuteWithArgs(contractAddr, "Initialize", uint64(1000000))
 ownerBalanceID := initResult.(vm.ObjectID)
 
-// 为其他用户创建账户
-aliceAddr := vm.Address{/* Alice 的地址 */}
-createResult, _ := engine.ExecuteWithArgs(contractAddr, "CreateAccount", aliceAddr)
-aliceBalanceID := createResult.(vm.ObjectID)
-
 // 转账 1000 代币给 Alice
-_ = engine.ExecuteWithArgs(contractAddr, "Transfer", ownerBalanceID, aliceBalanceID, uint64(1000))
+_ = engine.ExecuteWithArgs(contractAddr, "Transfer", aliceAddr, uint64(1000))
 
 // 查询 Alice 的余额
 balance, _ := engine.ExecuteWithArgs(contractAddr, "GetBalance", aliceBalanceID)
@@ -279,7 +275,7 @@ func (e *Engine) extractContractInfo(code []byte) (packageName string, exportedF
 
 ### 4. 添加 WASI 包装代码
 
-为了使合约能够与 WebAssembly 系统接口通信，需要生成包装代码：
+为了使合约能够与 WebAssembly 系统接口通信，需要生成包装代码（包装代码将和合约代码在相同目录下）：
 
 ```go
 func (e *Engine) generateWASIWrapper(packageName string, exportedFuncs []FunctionInfo) ([]byte, error) {
@@ -290,8 +286,6 @@ package main
 import (
     "encoding/binary"
     "unsafe"
-    
-    "%s" // 原始合约包
 )
 
 // WebAssembly 内存接口
@@ -300,6 +294,8 @@ func vm_alloc(size uint32) uint32
 
 //export vm_free
 func vm_free(ptr uint32)
+
+// 其他适配代码
 
 // 为每个导出函数生成包装器
 %s
@@ -339,8 +335,8 @@ func generateFunctionWrapper(fn FunctionInfo) string {
 //export %s
 func %s(%s) %s {
     // 调用合约函数
-    return %s.%s(%s)
-}`, fn.Name, fn.Name, strings.Join(params, ", "), returns, packageName, fn.Name, strings.Join(paramNames(fn.Params), ", "))
+    return %s(%s)
+}`, fn.Name, fn.Name, strings.Join(params, ", "), returns, fn.Name, strings.Join(paramNames(fn.Params), ", "))
 }
 
 // 辅助函数：提取参数名列表

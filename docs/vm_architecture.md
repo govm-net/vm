@@ -57,7 +57,7 @@ vm/
 
 - **Engine**：VM 的主要实现，处理合约的部署和执行
 - **ExecutionContext**：Context 接口的实现，提供合约执行环境
-- **StateObject/DBStateObject**：Object 接口的内存和数据库实现
+- **MStateObject/DBStateObject**：Object 接口的内存和数据库实现
 - **WasmEngine**：负责 WebAssembly 模块的加载和执行
 - **WASI**：WebAssembly 系统接口的实现和支持
 
@@ -66,7 +66,7 @@ vm/
 提供示例合约和模板：
 
 ```
-contracts/
+examples/
 ├── token.go     # 代币合约示例
 └── nft.go       # NFT合约示例
 ```
@@ -107,7 +107,7 @@ if err := maker.ValidateContract(code); err != nil {
 ```
 
 验证过程包含多重检查：
-- **导入检查**：确保合约只导入允许的包（如 `github.com/govm-net/vm/core`）
+- **导入检查**：确保合约只导入允许的包（如 `github.com/govm-net/vm`）
 - **关键字检查**：禁止使用可能导致非确定性行为的 Go 关键字（如 `go`, `select`, `recover`）
 - **大小限制**：确保合约代码不超过配置的最大大小
 - **结构检查**：验证合约包含至少一个导出（公开）函数
@@ -118,14 +118,16 @@ if err := maker.ValidateContract(code); err != nil {
 验证通过后，系统使用 Go 的 AST（抽象语法树）分析工具提取关键信息：
 
 ```go
-// 提取包名和合约结构体名称
-packageName, contractName, err := maker.extractContractInfo(code)
+// 提取包名和合约对外函数列表
+packageName, functions, err := maker.extractContractInfo(code)
 ```
 
 该步骤会：
 - 解析 Go 源码的包结构
 - 确定包名（package name）
-- 识别主要合约结构体（通常是第一个导出的结构体）
+- 识别主要合约对外接口列表
+  - 函数名
+  - 函数参数列表
 - 分析函数声明，建立合约接口映射
 
 #### 1.4 WASI 包装代码生成
@@ -134,7 +136,7 @@ packageName, contractName, err := maker.extractContractInfo(code)
 
 ```go
 // 生成 WASI 接口包装代码
-wrapperCode := generateWASIWrapper(packageName, contractName, code)
+wrapperCode := generateWASIWrapper(packageName, functions, code)
 ```
 
 包装代码提供以下功能：
@@ -214,30 +216,23 @@ engine.contracts[contractAddr] = wasmPath
 
 #### 流程图示
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ 接收合约源码     │────>│ 解压缩 (如需)    │────>│ 验证合约源码       │
-└─────────────────┘     └─────────────────┘     └──────────────────┘
-          │                                               │
-          ▼                                               ▼
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ 提取合约信息     │<────│ 分析 Go 代码结构  │<────│ 检查语法和限制     │
-└─────────────────┘     └─────────────────┘     └──────────────────┘
-          │
-          ▼
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ 生成 WASI 包装   │────>│ 准备编译环境      │────>│ 设置模块依赖       │
-└─────────────────┘     └─────────────────┘     └──────────────────┘
-          │                                               │
-          ▼                                               ▼
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ TinyGo 编译     │────>│ 优化 WASM 模块    │────>│ 验证模块有效性     │
-└─────────────────┘     └─────────────────┘     └──────────────────┘
-          │
-          ▼
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ 存储 WASM 模块   │────>│ 注册合约信息      │────>│ 返回合约地址       │
-└─────────────────┘     └─────────────────┘     └──────────────────┘
+```mermaid
+flowchart TD
+    A[接收合约源码] --如果需要--> B[解压缩]
+    B --> C[验证合约源码]
+    A --> C
+    C --> D[检查语法和限制]
+    D --> E[分析 Go 代码结构]
+    E --> F[提取合约信息]
+    F --> G[生成 WASI 包装]
+    G --> H[准备编译环境]
+    H --> I[设置模块依赖]
+    I --> J[TinyGo 编译]
+    J --> K[优化 WASM 模块]
+    K --> L[验证模块有效性]
+    L --> M[存储 WASM 模块]
+    M --> N[注册合约信息]
+    N --> O[返回合约地址]
 ```
 
 ### 2. WebAssembly 执行流程
@@ -246,7 +241,7 @@ engine.contracts[contractAddr] = wasmPath
 
 ```mermaid
 flowchart TD
-    A[接收执行请求\nEngine.Execute] --> B[检查合约类型]
+    A[接收执行请求] --> B[检查合约类型]
     B --> C[准备执行参数]
     C --> D[序列化为二进制格式]
     D --> E[初始化Wasmer运行时]
@@ -289,6 +284,7 @@ VM 支持两种类型的状态对象：
 1. **内存状态对象 (StateObject)**：
    - 数据存储在内存中
    - 适用于临时状态或测试
+   - 比如：交易有效性验证
 
 2. **数据库状态对象 (DBStateObject)**：
    - 数据持久化在数据库中
@@ -298,28 +294,9 @@ VM 支持两种类型的状态对象：
 ### 数据库状态键结构
 
 ```
-对象元数据：'o' + 合约地址 + 对象ID -> 对象元数据(ID, 类型, 所有者)
-字段值：'f' + 合约地址 + 对象ID + 字段名 -> 字段值
-所有者索引：'i' + 合约地址 + 所有者地址 + 对象ID -> 空值(用于查找)
+对象元数据：'o' + 对象ID -> 对象元数据(ID, 类型, 所有者)
+字段值：'f' + 对象ID + 字段名 -> 字段值
 ```
-
-## 参数编码/解码系统
-
-VM 提供了完整的参数编码和解码系统，用于在主进程和 WebAssembly 模块之间传递数据：
-
-### 编码系统 (EncodeParam)
-
-- 支持基本类型（字符串、数字、布尔值）
-- 支持特殊类型（ObjectID、Address）
-- 支持实现了 Encoder 接口的自定义类型
-- 使用二进制格式提高效率
-
-### 解码系统 (DecodeParam)
-
-- 根据目标类型解析输入字节
-- 支持从 WASM 内存读取数据
-- 优雅处理空值和类型转换
-- 提供适当的错误信息
 
 ## 安全机制
 
@@ -386,16 +363,8 @@ import (
     "github.com/govm-net/vm/core"
 )
 
-// 合约结构体 - 无状态设计
-type MyContract struct{}
-
-// 常量定义
-const (
-    DATA_OBJECT_TYPE = "Data"
-)
-
 // 初始化函数 - 部署时调用
-func (c *MyContract) Initialize(ctx core.Context, initialValue string) (core.ObjectID, error) {
+func Initialize(ctx core.Context, initialValue string) (core.ObjectID, error) {
     // 创建一个数据对象
     dataObj, err := ctx.CreateObject()
     if err != nil {
@@ -413,7 +382,7 @@ func (c *MyContract) Initialize(ctx core.Context, initialValue string) (core.Obj
 }
 
 // 公共函数 - 读取值
-func (c *MyContract) GetValue(ctx core.Context, dataObjectID core.ObjectID) (string, error) {
+func GetValue(ctx core.Context, dataObjectID core.ObjectID) (string, error) {
     // 获取数据对象
     dataObj, err := ctx.GetObject(dataObjectID)
     if err != nil {
@@ -430,7 +399,7 @@ func (c *MyContract) GetValue(ctx core.Context, dataObjectID core.ObjectID) (str
 }
 
 // 公共函数 - 设置值
-func (c *MyContract) SetValue(ctx core.Context, dataObjectID core.ObjectID, newValue string) (bool, error) {
+func SetValue(ctx core.Context, dataObjectID core.ObjectID, newValue string) (bool, error) {
     // 获取数据对象
     dataObj, err := ctx.GetObject(dataObjectID)
     if err != nil {
