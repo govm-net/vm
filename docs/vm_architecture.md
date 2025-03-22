@@ -26,9 +26,7 @@ VM 的架构分为三个主要层次：
 定义基础接口和类型：
 
 ```
-core/
-├── contract.go  # 核心接口定义：Context, Object, Address, ObjectID
-└── errors.go    # 公共错误类型
+contract_interface.go  # 核心接口定义：Context, Object, Address, ObjectID
 ```
 
 主要接口：

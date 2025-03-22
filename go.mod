@@ -1,4 +1,4 @@
-module github.com/lengzhao/govm-net/vm
+module github.com/govm-net/vm
 
 go 1.19
 

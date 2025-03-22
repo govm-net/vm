@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"unsafe"
+
+	"github.com/govm-net/vm"
 )
 
 // 函数ID常量定义
@@ -36,10 +38,10 @@ const HostBufferSize int32 = 2048
 var hostBufferPtr int32 = 0
 
 // Address represents a blockchain address
-type Address [20]byte
+type Address = vm.Address
 
 // ObjectID represents a unique identifier for a state object
-type ObjectID [32]byte
+type ObjectID = vm.ObjectID
 
 // Context implements the core.Context interface
 type Context struct {
@@ -50,6 +52,9 @@ type Context struct {
 type Object struct {
 	id ObjectID
 }
+
+var _ vm.Context = &Context{}
+var _ vm.Object = &Object{}
 
 // call_host_set - 用于向主机传递数据的操作，如set操作
 //
@@ -71,7 +76,7 @@ func get_block_height() int64
 func get_block_time() int64
 
 //export get_balance
-func get_balance(addrPtr int32) int64
+func get_balance(addrPtr int32) float64
 
 // 设置主机缓冲区地址的函数
 //
@@ -93,22 +98,7 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, val
 
 	// 根据函数ID选择合适的调用方式
 	switch funcID {
-	// 使用单独的函数来获取简单数据类型（不需要缓冲区）
-	case FuncGetBlockHeight:
-		value = get_block_height()
-		return 0, 0, value
-
-	case FuncGetBlockTime:
-		value = get_block_time()
-		return 0, 0, value
-
-	case FuncGetBalance:
-		if argLen != 20 {
-			return 0, 0, 0
-		}
-		value = get_balance(argPtr)
-		return 0, 0, value
-
+	// 简单数据类型现在由Context方法直接调用相应的导出函数，这里不再处理
 	// 需要通过缓冲区返回复杂数据的函数
 	case FuncGetSender, FuncGetContractAddress, FuncCall,
 		FuncGetObject, FuncGetObjectWithOwner, FuncCreateObject,
@@ -218,15 +208,14 @@ func (c *Context) Sender() Address {
 }
 
 func (c *Context) BlockHeight() uint64 {
-	// 调用宿主函数，使用专用函数获取区块高度
-	_, _, value := callHost(FuncGetBlockHeight, nil)
+	// 直接调用宿主函数，无需经过callHost中转
+	value := get_block_height()
 	return uint64(value)
 }
 
 func (c *Context) BlockTime() int64 {
-	// 调用宿主函数，使用专用函数获取区块时间
-	_, _, value := callHost(FuncGetBlockTime, nil)
-	return value
+	// 直接调用宿主函数，无需经过callHost中转
+	return get_block_time()
 }
 
 func (c *Context) ContractAddress() Address {
@@ -238,10 +227,9 @@ func (c *Context) ContractAddress() Address {
 	return addr
 }
 
-func (c *Context) Balance(addr Address) uint64 {
-	// 调用宿主函数，使用专用函数获取余额
-	_, _, value := callHost(FuncGetBalance, addr[:])
-	return uint64(value)
+func (c *Context) Balance(addr Address) float64 {
+	// 直接调用宿主函数，无需经过callHost中转
+	return get_balance(int32(uintptr(unsafe.Pointer(&addr[0]))))
 }
 
 func (c *Context) Transfer(to Address, amount uint64) error {
@@ -293,43 +281,43 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
 	return readMemory(ptr, size), nil
 }
 
-func (c *Context) GetObject(objectID ObjectID) (Object, error) {
+func (c *Context) GetObject(objectID ObjectID) (vm.Object, error) {
 	// 调用宿主函数，使用常量FuncGetObject
 	ptr, size, _ := callHost(FuncGetObject, objectID[:])
 	if ptr == 0 || size == 0 {
-		return Object{}, fmt.Errorf("object not found")
+		return &Object{}, fmt.Errorf("object not found")
 	}
 
 	data := readMemory(ptr, size)
 	var obj Object
 	copy(obj.id[:], data)
-	return obj, nil
+	return &obj, nil
 }
 
-func (c *Context) GetObjectWithOwner(owner Address) (Object, error) {
+func (c *Context) GetObjectWithOwner(owner Address) (vm.Object, error) {
 	// 调用宿主函数，使用常量FuncGetObjectWithOwner
 	ptr, size, _ := callHost(FuncGetObjectWithOwner, owner[:])
 	if ptr == 0 || size == 0 {
-		return Object{}, fmt.Errorf("object not found")
+		return &Object{}, fmt.Errorf("object not found")
 	}
 
 	data := readMemory(ptr, size)
 	var obj Object
 	copy(obj.id[:], data)
-	return obj, nil
+	return &obj, nil
 }
 
-func (c *Context) CreateObject() (Object, error) {
+func (c *Context) CreateObject() (vm.Object, error) {
 	// 调用宿主函数，使用常量FuncCreateObject
 	ptr, size, _ := callHost(FuncCreateObject, nil)
 	if ptr == 0 || size == 0 {
-		return Object{}, fmt.Errorf("failed to create object")
+		return &Object{}, fmt.Errorf("failed to create object")
 	}
 
 	data := readMemory(ptr, size)
 	var obj Object
 	copy(obj.id[:], data)
-	return obj, nil
+	return &obj, nil
 }
 
 func (c *Context) DeleteObject(objectID ObjectID) error {
@@ -344,7 +332,10 @@ func (c *Context) DeleteObject(objectID ObjectID) error {
 func (c *Context) Log(event string, data ...any) {
 	// 序列化参数
 	eventBytes := []byte(event)
-	dataBytes, _ := json.Marshal(data)
+	dataBytes, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
 
 	// 创建完整参数数据
 	paramData := make([]byte, 4+len(eventBytes)+4+len(dataBytes))

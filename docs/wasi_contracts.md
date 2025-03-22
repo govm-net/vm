@@ -20,20 +20,20 @@ package token
 
 import (
     "fmt"
-    "github.com/govm-net/vm/core"
+    "github.com/govm-net/vm"
 )
 
 // Initialize 初始化代币合约，创建初始供应量
-func Initialize(ctx core.Context, totalSupply uint64) (core.ObjectID, error) {
+func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
     // 创建代币发行者的余额对象
     balanceObj, err := ctx.CreateObject()
     if err != nil {
-        return core.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
+        return vm.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
     }
 
     // 设置发行者的初始余额
     if err := balanceObj.Set("amount", totalSupply); err != nil {
-        return core.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
+        return vm.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
     }
 
     // 设置对象所有者为合约部署者
@@ -46,49 +46,40 @@ func Initialize(ctx core.Context, totalSupply uint64) (core.ObjectID, error) {
 }
 
 // Transfer 在账户之间转移代币
-func Transfer(ctx core.Context, fromBalanceID, toBalanceID core.ObjectID, amount uint64) error {
+func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
     // 获取发送方余额对象
-    fromBalance, err := ctx.GetObject(fromBalanceID)
+    fromBalance, err := ctx.GetObjectWithOwner( ctx.Sender())
     if err != nil {
         return fmt.Errorf("failed to get sender balance: %w", err)
     }
 
-    // 验证发送方是否为余额对象的所有者
-    if fromBalance.Owner() != ctx.Sender() {
-        return core.ErrUnauthorized
-    }
-
     // 获取接收方余额对象
-    toBalance, err := ctx.GetObject(toBalanceID)
+    toBalance, err := ctx.CreateObject()
     if err != nil {
         return fmt.Errorf("failed to get receiver balance: %w", err)
     }
 
     // 读取当前余额
-    fromAmount, err := fromBalance.Get("amount")
+    var fromAmount uint64
+    err := fromBalance.Get("amount",&fromAmount)
     if err != nil {
         return fmt.Errorf("failed to get sender amount: %w", err)
     }
 
     // 检查余额是否充足
-    if fromAmount.(uint64) < amount {
-        return fmt.Errorf("insufficient balance: %d < %d", fromAmount.(uint64), amount)
-    }
-
-    // 获取接收方当前余额
-    toAmount, err := toBalance.Get("amount")
-    if err != nil {
-        return fmt.Errorf("failed to get receiver amount: %w", err)
+    if fromAmount < amount {
+        return fmt.Errorf("insufficient balance: %d < %d", fromAmount, amount)
     }
 
     // 更新双方余额
-    if err := fromBalance.Set("amount", fromAmount.(uint64)-amount); err != nil {
+    if err := fromBalance.Set("amount", fromAmount-amount); err != nil {
         return fmt.Errorf("failed to update sender balance: %w", err)
     }
 
-    if err := toBalance.Set("amount", toAmount.(uint64)+amount); err != nil {
+    if err := toBalance.Set("amount", amount); err != nil {
         return fmt.Errorf("failed to update receiver balance: %w", err)
     }
+    toBalance.SetOwner(to)
 
     // 记录转账事件
     ctx.Log("Transfer", 
@@ -100,7 +91,7 @@ func Transfer(ctx core.Context, fromBalanceID, toBalanceID core.ObjectID, amount
 }
 
 // GetBalance 查询账户余额
-func GetBalance(ctx core.Context, balanceID core.ObjectID) (uint64, error) {
+func GetBalance(ctx vm.Context, balanceID vm.ObjectID) (uint64, error) {
     // 获取余额对象
     balanceObj, err := ctx.GetObject(balanceID)
     if err != nil {
@@ -117,16 +108,16 @@ func GetBalance(ctx core.Context, balanceID core.ObjectID) (uint64, error) {
 }
 
 // CreateAccount 为新用户创建账户
-func CreateAccount(ctx core.Context, owner core.Address) (core.ObjectID, error) {
+func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
     // 创建新的余额对象
     balanceObj, err := ctx.CreateObject()
     if err != nil {
-        return core.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
+        return vm.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
     }
 
     // 设置初始余额为0
     if err := balanceObj.Set("amount", uint64(0)); err != nil {
-        return core.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
+        return vm.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
     }
 
     // 设置对象所有者
@@ -158,12 +149,12 @@ contractAddr, _ := engine.DeployWithOptions(code, deployOptions)
 
 // 初始化合约，发行 1000000 代币
 initResult, _ := engine.ExecuteWithArgs(contractAddr, "Initialize", uint64(1000000))
-ownerBalanceID := initResult.(core.ObjectID)
+ownerBalanceID := initResult.(vm.ObjectID)
 
 // 为其他用户创建账户
-aliceAddr := core.Address{/* Alice 的地址 */}
+aliceAddr := vm.Address{/* Alice 的地址 */}
 createResult, _ := engine.ExecuteWithArgs(contractAddr, "CreateAccount", aliceAddr)
-aliceBalanceID := createResult.(core.ObjectID)
+aliceBalanceID := createResult.(vm.ObjectID)
 
 // 转账 1000 代币给 Alice
 _ = engine.ExecuteWithArgs(contractAddr, "Transfer", ownerBalanceID, aliceBalanceID, uint64(1000))
@@ -180,13 +171,13 @@ fmt.Printf("Alice's balance: %d\n", balance.(uint64))
 ### 1. 源码接收与解压
 
 ```go
-func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (core.Address, error) {
+func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (vm.Address, error) {
     // 检查源码是否被压缩（GZIP 格式）
     if isGzipCompressed(code) {
         var err error
         code, err = decompressGzip(code)
         if err != nil {
-            return core.ZeroAddress(), fmt.Errorf("failed to decompress contract code: %w", err)
+            return vm.ZeroAddress(), fmt.Errorf("failed to decompress contract code: %w", err)
         }
     }
     
@@ -204,12 +195,12 @@ func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (core.Add
 合约源码必须通过严格的验证流程，以确保其安全性和与平台的兼容性：
 
 ```go
-func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (core.Address, error) {
+func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (vm.Address, error) {
     // ... 解压代码后
     
     // 验证合约源码
     if err := e.maker.ValidateContract(code); err != nil {
-        return core.ZeroAddress(), fmt.Errorf("contract validation failed: %w", err)
+        return vm.ZeroAddress(), fmt.Errorf("contract validation failed: %w", err)
     }
     
     // 继续处理验证通过的代码...
@@ -488,20 +479,20 @@ func (e *Engine) optimizeWasmModule(wasmCode []byte) ([]byte, error) {
 最后，将编译好的 WebAssembly 模块存储在指定位置：
 
 ```go
-func (e *Engine) storeWasmContract(wasmCode []byte, options DeployOptions) (core.Address, error) {
+func (e *Engine) storeWasmContract(wasmCode []byte, options DeployOptions) (vm.Address, error) {
     // 生成合约地址
     contractAddr := generateContractAddress(wasmCode)
     
     // 创建存储目录（如果不存在）
     wasmDir := e.config.WASIContractsDir
     if err := os.MkdirAll(wasmDir, 0755); err != nil {
-        return core.ZeroAddress(), fmt.Errorf("failed to create WASI contracts directory: %w", err)
+        return vm.ZeroAddress(), fmt.Errorf("failed to create WASI contracts directory: %w", err)
     }
     
     // 保存 WASM 模块到文件
     wasmFilePath := filepath.Join(wasmDir, contractAddr.String()+".wasm")
     if err := os.WriteFile(wasmFilePath, wasmCode, 0644); err != nil {
-        return core.ZeroAddress(), fmt.Errorf("failed to save WASM module: %w", err)
+        return vm.ZeroAddress(), fmt.Errorf("failed to save WASM module: %w", err)
     }
     
     // 记录合约信息到内部存储
@@ -778,7 +769,7 @@ WASIOptions: vm.WASIOptions{
 合约中添加详细日志：
 
 ```go
-func (c *Counter) Increment(ctx core.Context, id core.ObjectID) (uint64, error) {
+func (c *Counter) Increment(ctx vm.Context, id vm.ObjectID) (uint64, error) {
     ctx.Log("Debug", "Processing increment for object", id.String())
     // ... 其余代码 ...
 }

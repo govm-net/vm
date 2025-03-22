@@ -361,53 +361,6 @@ func getBalanceHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Val
 	}
 }
 
-// 辅助函数，用于从 WebAssembly 内存中读取字符串
-func readString(memory *wasmer.Memory, ptr, len uint32) string {
-	data := memory.Data()[ptr : ptr+len]
-	return string(data)
-}
-
-// 辅助函数，用于将字符串写入 WebAssembly 内存
-func writeString(memory *wasmer.Memory, ptr uint32, s string) {
-	copy(memory.Data()[ptr:ptr+uint32(len(s))], s)
-	// 添加 null 终止符
-	memory.Data()[ptr+uint32(len(s))] = 0
-}
-
-// 辅助函数 - 使用allocate分配内存并写入数据
-func allocateAndWrite(instance *wasmer.Instance, memory *wasmer.Memory, data []byte) (int32, error) {
-	// 尝试获取allocate函数
-	allocate, err := instance.Exports.GetFunction("allocate")
-	if err != nil {
-		// 如果没有allocate函数，使用固定内存位置
-		const memoryOffset = 1024
-		copy(memory.Data()[memoryOffset:memoryOffset+len(data)], data)
-		return int32(memoryOffset), nil
-	}
-
-	// 调用allocate函数
-	result, err := allocate(int32(len(data)))
-	if err != nil {
-		return 0, fmt.Errorf("内存分配失败: %v", err)
-	}
-
-	// 获取内存指针
-	ptr := result.(int32)
-
-	// 复制数据到内存
-	copy(memory.Data()[int(ptr):int(ptr)+len(data)], data)
-
-	return ptr, nil
-}
-
-// 辅助函数 - 释放已分配的内存
-func deallocateMemory(instance *wasmer.Instance, ptr int32, size int32) {
-	deallocate, err := instance.Exports.GetFunction("deallocate")
-	if err == nil {
-		_, _ = deallocate(ptr, size) // 忽略可能的错误
-	}
-}
-
 // 初始化主机缓冲区
 func initHostBuffer(instance *wasmer.Instance, memory *wasmer.Memory) error {
 	// 安全检查 - 确保memory不为nil
@@ -582,7 +535,7 @@ func main() {
 				[]*wasmer.ValueType{
 					wasmer.NewValueType(wasmer.I32), // addrPtr
 				},
-				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)}, // 返回int64
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.F64)}, // 返回float64
 			),
 			getBalanceHandler(memory),
 		),
@@ -635,54 +588,56 @@ func main() {
 	deallocate, dealErr := instance.Exports.GetFunction("deallocate")
 
 	// 添加示例：如何使用内存分配函数传递数据给 WebAssembly
-	if allocErr == nil {
-		fmt.Println("使用 WebAssembly 模块的内存分配函数")
+	if allocErr != nil {
+		fmt.Println("没有allocate函数")
+		return
+	}
+	fmt.Println("使用 WebAssembly 模块的内存分配函数")
 
-		// 创建示例数据
-		data := []byte{1, 2, 3, 4, 5, 10, 20, 30, 40, 50}
+	// 创建示例数据
+	data := []byte{1, 2, 3, 4, 5, 10, 20, 30, 40, 50}
 
-		// 分配内存
-		result, err := allocate(int32(len(data)))
+	// 分配内存
+	result, err := allocate(int32(len(data)))
+	if err != nil {
+		log.Fatalf("内存分配失败: %v", err)
+	}
+
+	// 获取内存指针
+	dataPtr := result.(int32)
+
+	// 复制数据到内存
+	copy(memory.Data()[int(dataPtr):int(dataPtr)+len(data)], data)
+
+	fmt.Printf("数据已复制到内存地址: %d\n", dataPtr)
+
+	// 调用hello函数（不带参数）
+	if helloFunc, err := instance.Exports.GetFunction("hello"); err == nil {
+		result, err := helloFunc()
 		if err != nil {
-			log.Fatalf("内存分配失败: %v", err)
-		}
-
-		// 获取内存指针
-		dataPtr := result.(int32)
-
-		// 复制数据到内存
-		copy(memory.Data()[int(dataPtr):int(dataPtr)+len(data)], data)
-
-		fmt.Printf("数据已复制到内存地址: %d\n", dataPtr)
-
-		// 调用hello函数（不带参数）
-		if helloFunc, err := instance.Exports.GetFunction("hello"); err == nil {
-			result, err := helloFunc()
-			if err != nil {
-				fmt.Printf("调用hello函数失败: %v\n", err)
-			} else {
-				fmt.Printf("hello函数返回: %v\n", result)
-			}
-		}
-
-		// 调用process_data函数（接受数据指针和长度）
-		if processDataFunc, err := instance.Exports.GetFunction("process_data"); err == nil {
-			result, err := processDataFunc(dataPtr, int32(len(data)))
-			if err != nil {
-				fmt.Printf("调用process_data函数失败: %v\n", err)
-			} else {
-				fmt.Printf("process_data函数返回: %v\n", result)
-			}
+			fmt.Printf("调用hello函数失败: %v\n", err)
 		} else {
-			fmt.Printf("获取process_data函数失败: %v\n", err)
+			fmt.Printf("hello函数返回: %v\n", result)
 		}
+	}
 
-		// 使用完后释放内存
-		if dealErr == nil {
-			_, err = deallocate(dataPtr, int32(len(data)))
-			if err != nil {
-				fmt.Printf("内存释放失败: %v\n", err)
-			}
+	// 调用process_data函数（接受数据指针和长度）
+	if processDataFunc, err := instance.Exports.GetFunction("process_data"); err == nil {
+		result, err := processDataFunc(dataPtr, int32(len(data)))
+		if err != nil {
+			fmt.Printf("调用process_data函数失败: %v\n", err)
+		} else {
+			fmt.Printf("process_data函数返回: %v\n", result)
+		}
+	} else {
+		fmt.Printf("获取process_data函数失败: %v\n", err)
+	}
+
+	// 使用完后释放内存
+	if dealErr == nil {
+		_, err = deallocate(dataPtr, int32(len(data)))
+		if err != nil {
+			fmt.Printf("内存释放失败: %v\n", err)
 		}
 	}
 }

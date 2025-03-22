@@ -1,6 +1,6 @@
-// Package core provides the fundamental interfaces and types for smart contracts
+// Package vm provides the fundamental interfaces and types for smart contracts
 // that run on the blockchain virtual machine.
-package core
+package vm
 
 // Address represents a blockchain address
 type Address [20]byte
@@ -24,7 +24,7 @@ type Context interface {
 	ContractAddress() Address
 
 	// Balance returns the balance of the given address
-	Balance(addr Address) uint64
+	Balance(addr Address) float64
 
 	// Transfer sends funds from the contract to the specified address
 	Transfer(to Address, amount uint64) error
