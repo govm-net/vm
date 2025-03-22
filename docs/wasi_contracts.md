@@ -11,6 +11,168 @@ VM 项目采用 WebAssembly 作为合约执行的核心技术，通过以下步�
 3. 通过 WASI 接口在合约与 VM 环境之间实现安全通信
 4. 确保合约在沙箱环境中执行，且能被精确控制资源使用
 
+## 合约示例
+
+下面是一个简单的代币合约示例，展示了如何编写标准的智能合约：
+
+```go
+package token
+
+import (
+    "fmt"
+    "github.com/govm-net/vm/core"
+)
+
+// Initialize 初始化代币合约，创建初始供应量
+func Initialize(ctx core.Context, totalSupply uint64) (core.ObjectID, error) {
+    // 创建代币发行者的余额对象
+    balanceObj, err := ctx.CreateObject()
+    if err != nil {
+        return core.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
+    }
+
+    // 设置发行者的初始余额
+    if err := balanceObj.Set("amount", totalSupply); err != nil {
+        return core.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
+    }
+
+    // 设置对象所有者为合约部署者
+    balanceObj.SetOwner(ctx.Sender())
+
+    // 记录初始化事件
+    ctx.Log("Initialize", "total_supply", totalSupply, "owner", ctx.Sender())
+
+    return balanceObj.ID(), nil
+}
+
+// Transfer 在账户之间转移代币
+func Transfer(ctx core.Context, fromBalanceID, toBalanceID core.ObjectID, amount uint64) error {
+    // 获取发送方余额对象
+    fromBalance, err := ctx.GetObject(fromBalanceID)
+    if err != nil {
+        return fmt.Errorf("failed to get sender balance: %w", err)
+    }
+
+    // 验证发送方是否为余额对象的所有者
+    if fromBalance.Owner() != ctx.Sender() {
+        return core.ErrUnauthorized
+    }
+
+    // 获取接收方余额对象
+    toBalance, err := ctx.GetObject(toBalanceID)
+    if err != nil {
+        return fmt.Errorf("failed to get receiver balance: %w", err)
+    }
+
+    // 读取当前余额
+    fromAmount, err := fromBalance.Get("amount")
+    if err != nil {
+        return fmt.Errorf("failed to get sender amount: %w", err)
+    }
+
+    // 检查余额是否充足
+    if fromAmount.(uint64) < amount {
+        return fmt.Errorf("insufficient balance: %d < %d", fromAmount.(uint64), amount)
+    }
+
+    // 获取接收方当前余额
+    toAmount, err := toBalance.Get("amount")
+    if err != nil {
+        return fmt.Errorf("failed to get receiver amount: %w", err)
+    }
+
+    // 更新双方余额
+    if err := fromBalance.Set("amount", fromAmount.(uint64)-amount); err != nil {
+        return fmt.Errorf("failed to update sender balance: %w", err)
+    }
+
+    if err := toBalance.Set("amount", toAmount.(uint64)+amount); err != nil {
+        return fmt.Errorf("failed to update receiver balance: %w", err)
+    }
+
+    // 记录转账事件
+    ctx.Log("Transfer", 
+        "from", fromBalance.Owner(),
+        "to", toBalance.Owner(),
+        "amount", amount)
+
+    return nil
+}
+
+// GetBalance 查询账户余额
+func GetBalance(ctx core.Context, balanceID core.ObjectID) (uint64, error) {
+    // 获取余额对象
+    balanceObj, err := ctx.GetObject(balanceID)
+    if err != nil {
+        return 0, fmt.Errorf("failed to get balance object: %w", err)
+    }
+
+    // 读取余额
+    amount, err := balanceObj.Get("amount")
+    if err != nil {
+        return 0, fmt.Errorf("failed to get amount: %w", err)
+    }
+
+    return amount.(uint64), nil
+}
+
+// CreateAccount 为新用户创建账户
+func CreateAccount(ctx core.Context, owner core.Address) (core.ObjectID, error) {
+    // 创建新的余额对象
+    balanceObj, err := ctx.CreateObject()
+    if err != nil {
+        return core.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
+    }
+
+    // 设置初始余额为0
+    if err := balanceObj.Set("amount", uint64(0)); err != nil {
+        return core.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
+    }
+
+    // 设置对象所有者
+    balanceObj.SetOwner(owner)
+
+    // 记录账户创建事件
+    ctx.Log("CreateAccount", "owner", owner)
+
+    return balanceObj.ID(), nil
+}
+```
+
+这个示例展示了一个基本的代币合约，包含以下特点：
+
+1. **包级别函数**：所有函数都是包级别的，无需定义结构体
+2. **无状态设计**：所有状态都存储在外部对象中
+3. **所有权控制**：通过对象所有权实现访问控制
+4. **事件记录**：使用 `ctx.Log` 记录重要操作
+5. **错误处理**：提供清晰的错误信息
+6. **类型安全**：使用强类型确保数据安全
+7. **公开接口**：所有公共函数首字母大写，自动导出为 WebAssembly 函数
+
+使用示例：
+
+```go
+// 部署合约
+code, _ := os.ReadFile("token.go")
+contractAddr, _ := engine.DeployWithOptions(code, deployOptions)
+
+// 初始化合约，发行 1000000 代币
+initResult, _ := engine.ExecuteWithArgs(contractAddr, "Initialize", uint64(1000000))
+ownerBalanceID := initResult.(core.ObjectID)
+
+// 为其他用户创建账户
+aliceAddr := core.Address{/* Alice 的地址 */}
+createResult, _ := engine.ExecuteWithArgs(contractAddr, "CreateAccount", aliceAddr)
+aliceBalanceID := createResult.(core.ObjectID)
+
+// 转账 1000 代币给 Alice
+_ = engine.ExecuteWithArgs(contractAddr, "Transfer", ownerBalanceID, aliceBalanceID, uint64(1000))
+
+// 查询 Alice 的余额
+balance, _ := engine.ExecuteWithArgs(contractAddr, "GetBalance", aliceBalanceID)
+fmt.Printf("Alice's balance: %d\n", balance.(uint64))
+```
+
 ## Go 智能合约编译为 WebAssembly 的内部流程
 
 本节详细介绍了 `engine.DeployWithOptions` 方法如何将 Go 源码转换为 WebAssembly 模块的内部实现细节。整个流程分为以下几个关键步骤：
@@ -66,31 +228,70 @@ func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (core.Add
 从验证通过的源码中提取关键信息：
 
 ```go
-func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (core.Address, error) {
-    // ... 验证合约后
-    
-    // 提取包名和合约结构体名称
-    packageName, contractName, err := e.maker.extractContractInfo(code)
+func (e *Engine) extractContractInfo(code []byte) (packageName string, exportedFuncs []FunctionInfo, error) {
+    // 解析 Go 源码
+    fset := token.NewFileSet()
+    file, err := parser.ParseFile(fset, "", code, parser.ParseComments)
     if err != nil {
-        return core.ZeroAddress(), fmt.Errorf("failed to extract contract info: %w", err)
+        return "", nil, fmt.Errorf("failed to parse Go code: %w", err)
     }
     
-    // 继续处理...
+    // 获取包名
+    packageName = file.Name.Name
+    
+    // 查找导出的包级别函数
+    exportedFuncs = make([]FunctionInfo, 0)
+    
+    ast.Inspect(file, func(n ast.Node) bool {
+        switch x := n.(type) {
+        case *ast.FuncDecl:
+            // 检查是否为包级别函数（没有接收者）且首字母大写（导出）
+            if x.Recv == nil && x.Name.IsExported() {
+                // 提取函数信息
+                params := make([]ParamInfo, 0)
+                for _, p := range x.Type.Params.List {
+                    paramType := types.ExprString(p.Type)
+                    for _, name := range p.Names {
+                        params = append(params, ParamInfo{
+                            Name: name.Name,
+                            Type: paramType,
+                        })
+                    }
+                }
+                
+                // 提取返回值信息
+                returns := make([]string, 0)
+                if x.Type.Results != nil {
+                    for _, r := range x.Type.Results.List {
+                        returns = append(returns, types.ExprString(r.Type))
+                    }
+                }
+                
+                exportedFuncs = append(exportedFuncs, FunctionInfo{
+                    Name:       x.Name.Name,
+                    Params:     params,
+                    Returns:    returns,
+                    IsExported: true,
+                })
+            }
+        }
+        return true
+    })
+    
+    if len(exportedFuncs) == 0 {
+        return "", nil, errors.New("no exported functions found")
+    }
+    
+    return packageName, exportedFuncs, nil
 }
 ```
-
-**提取过程**:
-- 使用 Go 标准库的 `go/parser` 和 `go/ast` 解析代码
-- 获取包名（package name）
-- 识别主要合约结构体（通常是第一个导出的结构体）
-- 分析函数声明，确认合约接口
 
 ### 4. 添加 WASI 包装代码
 
 为了使合约能够与 WebAssembly 系统接口通信，需要生成包装代码：
 
 ```go
-func (e *Engine) generateWASIWrapper(packageName, contractName string, originalCode []byte) ([]byte, error) {
+func (e *Engine) generateWASIWrapper(packageName string, exportedFuncs []FunctionInfo) ([]byte, error) {
     // 基于原始合约代码和提取的信息生成 WASI 接口包装
     wrapperTemplate := `
 package main
@@ -109,23 +310,69 @@ func vm_alloc(size uint32) uint32
 //export vm_free
 func vm_free(ptr uint32)
 
-// 包装原始合约
-var contract = &%s.%s{}
-
-// 主入口点
-//export execute
-func execute() int32 {
-    // 参数解码和函数调用逻辑
-    // ...
-    return 0
-}
+// 为每个导出函数生成包装器
+%s
 
 func main() {
-    // WASI 模块需要 main 函数，但实际执行通过 execute
+    // WASI 模块需要 main 函数
 }
 `
+    // 生成所有导出函数的包装代码
+    var functionWrappers strings.Builder
+    for _, fn := range exportedFuncs {
+        wrapper := generateFunctionWrapper(fn)
+        functionWrappers.WriteString(wrapper)
+        functionWrappers.WriteString("\n")
+    }
     
-    return []byte(fmt.Sprintf(wrapperTemplate, packageName, packageName, contractName)), nil
+    return []byte(fmt.Sprintf(wrapperTemplate, 
+        packageName,
+        functionWrappers.String())), nil
+}
+
+// 生成单个函数的包装代码
+func generateFunctionWrapper(fn FunctionInfo) string {
+    // 生成参数声明
+    params := make([]string, len(fn.Params))
+    for i, p := range fn.Params {
+        params[i] = fmt.Sprintf("%s %s", p.Name, p.Type)
+    }
+    
+    // 生成返回值声明
+    returns := strings.Join(fn.Returns, ", ")
+    if returns != "" {
+        returns = "(" + returns + ")"
+    }
+    
+    return fmt.Sprintf(`
+//export %s
+func %s(%s) %s {
+    // 调用合约函数
+    return %s.%s(%s)
+}`, fn.Name, fn.Name, strings.Join(params, ", "), returns, packageName, fn.Name, strings.Join(paramNames(fn.Params), ", "))
+}
+
+// 辅助函数：提取参数名列表
+func paramNames(params []ParamInfo) []string {
+    names := make([]string, len(params))
+    for i, p := range params {
+        names[i] = p.Name
+    }
+    return names
+}
+
+// 参数信息结构
+type ParamInfo struct {
+    Name string
+    Type string
+}
+
+// 函数信息结构
+type FunctionInfo struct {
+    Name       string
+    Params     []ParamInfo
+    Returns    []string
+    IsExported bool
 }
 ```
 

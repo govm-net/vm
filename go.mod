@@ -1,3 +1,5 @@
-module github.com/govm-net/vm
+module github.com/lengzhao/govm-net/vm
 
-go 1.22.5
+go 1.19
+
+require github.com/wasmerio/wasmer-go v1.0.4
