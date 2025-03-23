@@ -272,309 +272,175 @@ func (c *Context) Sender() Address {
 
 ## 4. 合约间调用信息传递
 
+合约之间的互相调用需要安全、可靠地传递调用者信息，系统采用统一的信息传递机制。
+
 ### 4.1 自动生成的参数结构体
 
-在包装合约代码时，平台会自动识别所有对外导出函数的接口和参数列表，并为每个函数自动生成相应的参数结构体：
+在合约编译阶段，系统会自动识别所有导出函数的接口和参数列表，为每个函数生成对应的参数结构体：
 
 ```go
-// 原始函数声明
-//export transfer
-func transfer(to Address, amount uint64) int32 { ... }
+// 原始合约函数 - 大写字母开头的函数自动导出
+func Transfer(to Address, amount uint64) error {
+    // 函数实现...
+}
 
-// 平台自动生成的参数结构体
+// 自动生成的参数结构体
 type TransferParams struct {
-    CallInfo *CallInfo `json:"call_info"`
-    To       Address   `json:"to"`
-    Amount   uint64    `json:"amount"`
+    CallInfo *CallInfo `json:"call_info"` // 自动注入的调用链信息
+    To       Address   `json:"to"`        // 第一个参数
+    Amount   uint64    `json:"amount"`    // 第二个参数
 }
 ```
 
-这种自动生成的结构体包含了函数的所有参数，以及额外的 `CallInfo` 字段用于传递调用链信息。平台会为每个对外函数生成这样的结构体，自动处理序列化和反序列化过程，避免了手动处理参数的复杂性和类型不匹配的问题。
+这种结构体设计的优势：
+- 统一的参数封装模式
+- 自动包含调用链信息
+- 字段名称与原始参数名称一致
+- 通过JSON标签支持序列化/反序列化
 
-### 4.2 统一的参数序列化处理
+### 4.2 参数序列化过程
 
-VM系统采用统一的参数传递机制，确保类型安全和调用链信息的传递：
+在跨合约调用时，系统对参数进行序列化处理：
 
 ```go
-// 合约调用的包装函数（由平台自动生成）
+// 在调用端（调用其他合约）
 func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
-    // 获取当前合约信息（由系统设置）
+    // 构建调用信息
     callInfo := &CallInfo{
-        CallerContract: c.contractAddr,
-        CallerFunction: getFunctionNameFromCallSite(),
+        CallerContract: c.ContractAddress(),
+        CallerFunction: getCurrentFunction(),
         CallChain:      append([]CallFrame{}, c.callChain...),
     }
     
-    // 根据目标函数生成参数结构体并包含类型信息
-    var params interface{}
-    switch function {
-    case "transfer":
-        // 确保参数数量和类型正确
-        if len(args) != 2 {
-            return nil, fmt.Errorf("transfer expects 2 arguments, got %d", len(args))
-        }
-        
-        // 类型安全检查
-        to, ok1 := args[0].(Address)
-        amount, ok2 := args[1].(uint64)
-        if !ok1 || !ok2 {
-            return nil, fmt.Errorf("invalid argument types for transfer")
-        }
-        
-        // 使用自动生成的结构体
-        params = &TransferParams{
-            CallInfo: callInfo,
-            To:       to,
-            Amount:   amount,
-        }
-    // 为所有已知函数提供类似处理...
-    default:
-        // 对于未知函数，使用带类型标记的通用参数结构
-        typedArgs := make([]TypedValue, len(args))
-        for i, arg := range args {
-            typedArgs[i] = CreateTypedValue(arg)
-        }
-        
-        genericParams := struct {
-            CallInfo *CallInfo    `json:"call_info"`
-            Args     []TypedValue `json:"args"`
-        }{
-            CallInfo: callInfo,
-            Args:     typedArgs,
-        }
-        params = genericParams
-    }
+    // 根据函数名自动识别并构建正确的参数结构体
+    paramsStruct := createParamsStruct(function, args)
     
-    // 序列化参数结构体，保留类型信息
-    serializedParams, err := serializeWithType(params)
+    // 注入调用信息
+    setCallInfoField(paramsStruct, callInfo)
+    
+    // 序列化参数结构体
+    paramsJSON, err := json.Marshal(paramsStruct)
     if err != nil {
-        return nil, fmt.Errorf("failed to serialize parameters: %v", err)
+        return nil, fmt.Errorf("failed to serialize parameters: %w", err)
     }
     
-    // 执行实际调用
-    return c.originalCall(contract, function, serializedParams)
+    // 发送序列化数据给目标合约
+    return performCall(contract, function, paramsJSON)
 }
 ```
 
-### 4.3 类型安全的参数反序列化
+自动化的参数结构体构建：
+- 为每个函数维护参数列表和类型信息
+- 根据函数名动态创建正确的参数结构体
+- 支持变长参数列表
+- 保留完整的类型信息
 
-在被调用合约一方，系统也采用统一的参数反序列化处理：
+### 4.3 参数反序列化过程
+
+在被调用合约接收到请求时，系统自动反序列化参数：
 
 ```go
-// 平台生成的包装函数
-//export contract_transfer
-func contract_transfer(dataPtr int32, dataLen int32) int32 {
-    // 进入函数钩子
-    mock.Enter(getCurrentContractAddress(), "transfer")
+// 在接收端（被调用的合约）
+//export handleExternalCall
+func handleExternalCall(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) int32 {
+    // 读取函数名
+    funcNameBytes := readMemory(funcNamePtr, funcNameLen)
+    funcName := string(funcNameBytes)
     
-    // 确保退出时调用退出钩子
-    defer func() {
-        mock.Exit(getCurrentContractAddress(), "transfer")
-    }()
+    // 读取参数JSON
+    paramsJSON := readMemory(paramsPtr, paramsLen)
     
-    // 读取输入数据
-    data := readMemory(dataPtr, dataLen)
+    // 查找函数处理器
+    handler, found := functionHandlers[funcName]
+    if !found {
+        errorResult := &ErrorResult{Error: "function not found: " + funcName}
+        resultJSON, _ := json.Marshal(errorResult)
+        writeResult(resultJSON)
+        return ErrorCodeNotFound
+    }
     
-    // 使用自动生成的结构体直接反序列化
+    // 调用函数处理器（会自动反序列化参数）
+    return handler(paramsJSON)
+}
+
+// Transfer函数的处理器（自动生成）
+func handleTransfer(paramsJSON []byte) int32 {
+    // 反序列化到正确的参数结构体
     var params TransferParams
-    if err := deserializeWithType(data, &params); err != nil {
-        return ErrorInvalidInput
+    if err := json.Unmarshal(paramsJSON, &params); err != nil {
+        errorResult := &ErrorResult{Error: "failed to parse parameters: " + err.Error()}
+        resultJSON, _ := json.Marshal(errorResult)
+        writeResult(resultJSON)
+        return ErrorCodeInvalidParams
     }
     
-    // 提取调用信息
-    callInfo := params.CallInfo
+    // 设置当前调用上下文
+    setCurrentCallInfo(params.CallInfo)
     
-    // 保存调用者信息到上下文
-    ctx := &Context{}
-    ctx.currentContract = callInfo.CallerContract
-    ctx.currentFunction = callInfo.CallerFunction
-    ctx.callChain = callInfo.CallChain
+    // 调用实际函数
+    err := Transfer(params.To, params.Amount)
     
-    // 执行权限检查
-    if !isAuthorized(callInfo.CallerContract, "transfer") {
-        return ErrorUnauthorized
+    // 处理返回结果
+    if err != nil {
+        errorResult := &ErrorResult{Error: err.Error()}
+        resultJSON, _ := json.Marshal(errorResult)
+        writeResult(resultJSON)
+        return ErrorCodeExecutionFailed
     }
     
-    // 调用原始函数，传递提取的参数
-    return original_transfer(params.To, params.Amount)
+    // 返回成功
+    writeResult([]byte("{}"))
+    return SuccessCode
 }
 ```
 
-### 4.4 TypedValue 结构体
+### 4.4 复杂结构参数处理
 
-为确保类型信息在序列化过程中不丢失，系统使用 `TypedValue` 结构体封装值和类型信息：
+对于包含自定义结构体的复杂参数，系统提供了类型注册机制：
 
 ```go
-// 带类型信息的值
-type TypedValue struct {
-    Type  string      `json:"type"`  // 类型标识符
-    Value interface{} `json:"value"` // 实际值
+// 类型注册表
+var typeRegistry = map[string]reflect.Type{
+    "Address": reflect.TypeOf(Address{}),
+    "ObjectID": reflect.TypeOf(ObjectID{}),
+    "TransferParams": reflect.TypeOf(TransferParams{}),
+    "SwapParams": reflect.TypeOf(SwapParams{}),
+    // 其他类型...
 }
 
-// 创建带类型信息的值
-func CreateTypedValue(v interface{}) TypedValue {
-    var typeName string
-    
-    // 根据值的类型设置类型标识符
-    switch v.(type) {
-    case int8:
-        typeName = "int8"
-    case int16:
-        typeName = "int16" 
-    case int32:
-        typeName = "int32"
-    case int64:
-        typeName = "int64"
-    case int:
-        typeName = "int"
-    case uint8:
-        typeName = "uint8"
-    case uint16:
-        typeName = "uint16"
-    case uint32:
-        typeName = "uint32"
-    case uint64:
-        typeName = "uint64"
-    case uint:
-        typeName = "uint"
-    case float32:
-        typeName = "float32"
-    case float64:
-        typeName = "float64"
-    case bool:
-        typeName = "bool"
-    case string:
-        typeName = "string"
-    case []byte:
-        typeName = "bytes"
-    case Address:
-        typeName = "address"
-    case ObjectID:
-        typeName = "objectid"
-    default:
-        // 复杂结构体使用反射获取类型名
-        t := reflect.TypeOf(v)
-        if t.Kind() == reflect.Ptr {
-            t = t.Elem()
-        }
-        typeName = t.String()
+// 反序列化复杂参数
+func unmarshalToRegisteredType(typeStr string, data []byte) (interface{}, error) {
+    // 查找注册的类型
+    t, found := typeRegistry[typeStr]
+    if !found {
+        return nil, fmt.Errorf("unknown type: %s", typeStr)
     }
     
-    return TypedValue{
-        Type:  typeName,
-        Value: v,
-    }
-}
-
-// 序列化带类型信息的数据
-func serializeWithType(v interface{}) ([]byte, error) {
-    // 使用标准 JSON 库序列化
-    // TypedValue 结构已经内置了类型信息
-    return json.Marshal(v)
-}
-
-// 反序列化带类型信息的数据
-func deserializeWithType(data []byte, target interface{}) error {
-    // 首先解析为通用结构
-    var jsonData interface{}
-    if err := json.Unmarshal(data, &jsonData); err != nil {
-        return err
+    // 创建正确类型的新实例
+    v := reflect.New(t).Interface()
+    
+    // 反序列化到正确类型的实例
+    if err := json.Unmarshal(data, v); err != nil {
+        return nil, err
     }
     
-    // 递归处理所有类型标记
-    processTypedValues(jsonData)
-    
-    // 重新序列化为处理后的 JSON
-    processedData, err := json.Marshal(jsonData)
-    if err != nil {
-        return err
-    }
-    
-    // 反序列化到目标结构
-    return json.Unmarshal(processedData, target)
-}
-
-// 递归处理类型标记
-func processTypedValues(data interface{}) interface{} {
-    // 实现递归逻辑，将 TypedValue 转换为正确类型
-    // 对于复杂结构体，使用反射和类型注册表创建正确类型的实例
-    
-    // 简化版实现
-    switch v := data.(type) {
-    case map[string]interface{}:
-        // 检查是否是 TypedValue
-        if typeStr, hasType := v["type"].(string); hasType {
-            if val, hasVal := v["value"]; hasVal {
-                return convertToType(val, typeStr)
-            }
-        }
-        
-        // 处理普通对象
-        for k, val := range v {
-            v[k] = processTypedValues(val)
-        }
-    case []interface{}:
-        // 处理数组
-        for i, val := range v {
-            v[i] = processTypedValues(val)
-        }
-    }
-    
-    return data
-}
-
-// 类型转换函数
-func convertToType(value interface{}, typeName string) interface{} {
-    switch typeName {
-    case "int8":
-        return int8(value.(float64))
-    case "int16":
-        return int16(value.(float64))
-    case "int32":
-        return int32(value.(float64))
-    case "int64":
-        return int64(value.(float64))
-    case "int":
-        return int(value.(float64))
-    case "uint8":
-        return uint8(value.(float64))
-    case "uint16":
-        return uint16(value.(float64))
-    case "uint32":
-        return uint32(value.(float64))
-    case "uint64":
-        return uint64(value.(float64))
-    case "uint":
-        return uint(value.(float64))
-    case "float32":
-        return float32(value.(float64))
-    case "float64":
-        return value.(float64)
-    case "bool":
-        return value.(bool)
-    case "string":
-        return value.(string)
-    case "bytes":
-        // 将 base64 字符串转回字节数组
-        bytes, _ := base64.StdEncoding.DecodeString(value.(string))
-        return bytes
-    // 处理自定义类型...
-    default:
-        // 处理复杂结构体，通过类型注册表创建实例
-        return value
-    }
+    return reflect.ValueOf(v).Elem().Interface(), nil
 }
 ```
 
-### 4.5 与合约接口系统的集成
+这种机制支持递归处理嵌套结构体，确保所有复杂参数都能保持正确的类型。
 
-自动参数处理机制与 `wasm_contract_interface.md` 中描述的基础接口系统无缝集成：
+### 4.5 性能优化策略
 
-1. **内存传递**: 对于合约侧和主机侧之间的数据传递，仍然使用内存指针和长度。
-2. **序列化层**: 在接口系统之上，添加了确保类型安全的序列化和反序列化层。
-3. **自动插桩**: 编译过程中的自动插桩确保调用链信息在所有跨合约调用中保持一致。
+为提高参数处理的性能，系统采用多种优化策略：
 
-这种设计使得合约开发者可以使用标准的 Go 类型，而系统会自动处理类型信息保留和参数传递的细节。
+1. **编译期生成结构体**：避免运行时反射创建结构体
+2. **静态类型表**：预编译函数参数类型信息
+3. **参数缓存**：在热路径上重用参数结构体
+4. **零拷贝**：尽可能减少内存复制
+5. **扁平化结构**：优化参数和调用信息的内存布局
+
+这些优化确保了即使在参数复杂的情况下，合约调用也能保持高效。
 
 ## 5. 实际应用场景
 

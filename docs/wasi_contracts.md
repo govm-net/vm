@@ -24,7 +24,6 @@ import (
 )
 
 // Initialize 初始化代币合约，创建初始供应量
-//export Initialize
 func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
     // 创建代币发行者的余额对象
     balanceObj, err := ctx.CreateObject()
@@ -47,7 +46,6 @@ func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
 }
 
 // Transfer 在账户之间转移代币
-//export Transfer
 func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
     // 获取发送方余额对象
     fromBalance, err := ctx.GetObjectWithOwner(ctx.Sender())
@@ -106,7 +104,6 @@ func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
 }
 
 // GetBalance 查询账户余额
-//export GetBalance
 func GetBalance(ctx vm.Context, owner vm.Address) (uint64, error) {
     // 获取余额对象
     balanceObj, err := ctx.GetObjectWithOwner(owner)
@@ -124,7 +121,6 @@ func GetBalance(ctx vm.Context, owner vm.Address) (uint64, error) {
 }
 
 // CreateAccount 为新用户创建账户
-//export CreateAccount
 func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
     // 创建新的余额对象
     balanceObj, err := ctx.CreateObject()
@@ -150,7 +146,7 @@ func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
 这个示例展示了一个基本的代币合约，包含以下特点：
 
 1. **包级别函数**：所有函数都是包级别的，无需定义结构体
-2. **使用 `//export` 标记**：使用 `//export` 标记导出函数，使其可被外部调用
+2. **自动导出**：大写字母开头的函数会自动被导出，无需添加特殊标记
 3. **无状态设计**：所有状态都存储在外部对象中
 4. **所有权控制**：通过对象所有权实现访问控制
 5. **事件记录**：使用 `ctx.Log` 记录重要操作

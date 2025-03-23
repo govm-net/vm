@@ -121,16 +121,94 @@ type Object interface {
 
 ### 3.3 参数传递统一机制
 
-为统一不同文档描述的参数传递机制，系统采用如下工作流程：
+为统一不同文档描述的参数传递机制，系统采用类似Go标准库RPC的工作流程：
 
-1. **基础类型参数**：直接通过 WebAssembly 数值类型传递
-2. **复杂参数**：
-   - 将参数序列化为带类型信息的 JSON 结构
-   - 自动为导出函数生成参数结构体，包含 CallInfo 字段
-   - 使用内存指针和长度传递序列化数据
-3. **调用链信息**：通过自动插桩在跨合约调用中注入 CallInfo 结构
+1. **基于RPC模型的参数结构体**：
+   - 自动为每个导出函数生成对应的参数结构体
+   - 参数结构体包含Call Info用于传递调用链信息
+   - 字段名称与原始参数名称一致
 
-### 3.4 错误处理统一框架
+2. **自动化参数处理**：
+   - 在合约编译阶段自动生成参数序列化/反序列化代码
+   - 使用函数分发表实现高效调用路由
+   - 支持丰富的错误处理和类型安全措施
+
+3. **类型安全的序列化**：
+   - 使用类型注册表确保类型信息保留
+   - 避免JSON反序列化的数值类型问题（如将整数转为float64）
+   - 支持复杂嵌套结构体的类型安全处理
+
+```go
+// 导出函数示例 - 使用大写字母开头即可，无需//export标记
+func Transfer(to Address, amount uint64) error {
+    // 函数实现...
+}
+
+// 自动生成的参数结构体
+type TransferParams struct {
+    CallInfo *CallInfo `json:"call_info"` // 自动注入的调用链信息
+    To       Address   `json:"to"`        // 参数1
+    Amount   uint64    `json:"amount"`    // 参数2
+}
+
+// 自动生成的方法处理器
+func handleTransfer(paramsJSON []byte) int32 {
+    var params TransferParams
+    if err := json.Unmarshal(paramsJSON, &params); err != nil {
+        // 错误处理...
+        return ErrorCodeInvalidParams
+    }
+    
+    // 设置调用上下文
+    setCurrentCallInfo(params.CallInfo)
+    
+    // 调用实际函数
+    err := Transfer(params.To, params.Amount)
+    
+    // 处理返回值...
+}
+```
+
+这种基于Go RPC模型的参数处理机制提供了多项优势：
+- 开发者只需使用标准Go函数命名规范（大写开头的函数自动导出），无需添加特殊注释
+- 系统自动识别并导出所有大写开头的函数，简化开发流程
+- 类型安全由系统保证，避免常见的JSON类型转换问题
+- 参数验证和错误处理统一规范
+
+### 3.4 函数导出规则简化
+
+系统采用了Go语言规范的公共/私有标识方法，简化了合约函数的导出机制：
+
+1. **自动导出规则**：
+   - 大写字母开头的函数自动被视为导出函数，可被外部调用
+   - 小写字母开头的函数为私有函数，仅合约内部可访问
+   - 无需添加特殊的 `//export` 注释标记
+
+2. **框架自动包装**：
+   - 编译系统自动识别所有大写开头的函数
+   - 为每个导出函数生成必要的包装代码
+   - 自动注册函数，使其可被主机环境调用
+
+3. **优势**：
+   - 更符合Go语言习惯
+   - 减少样板代码
+   - 避免导出标记与实际导出不一致的问题
+   - 简化合约开发流程
+
+示例：
+```go
+// 公开函数 - 自动导出，外部可调用
+func Transfer(to Address, amount uint64) error {
+    return performTransfer(to, amount)
+}
+
+// 私有函数 - 不导出，仅内部使用
+func performTransfer(to Address, amount uint64) error {
+    // 实现转账逻辑...
+}
+```
+
+### 3.5 错误处理统一框架
 
 系统采用统一的错误处理模式：
 

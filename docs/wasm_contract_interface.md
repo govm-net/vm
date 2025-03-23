@@ -29,7 +29,7 @@ flowchart LR
 
 ### 2.1 导出函数
 
-WebAssembly合约需要导出两类函数：
+WebAssembly合约有两类函数会被导出：
 
 #### 2.1.1 基础必需的导出函数
 
@@ -56,35 +56,45 @@ func set_host_buffer(ptr int32) {
 }
 ```
 
+注意：这些系统基础函数仍需使用 `//export` 注释标记，因为它们是框架内部使用的特殊函数。
+
 #### 2.1.2 合约自定义的对外函数
 
 这些函数是合约自身的业务逻辑函数，由开发者根据需求定义：
 
 ```go
-//export hello
-func hello() int32 {
+// 公开函数 - 自动导出
+func Hello() int32 {
     // 合约示例函数
     ctx := &Context{}
     ctx.Log("hello", "world")
     return 1
 }
 
-//export process_data
-func process_data(dataPtr int32, dataLen int32) int32 {
+// 公开函数 - 自动导出
+func ProcessData(dataPtr int32, dataLen int32) int32 {
     // 处理数据的示例函数
     data := readMemory(dataPtr, dataLen)
     // 业务逻辑处理
     return sum
 }
 
-//export transfer_token
-func transfer_token(toPtr int32, amount int64) int32 {
+// 公开函数 - 自动导出
+func TransferToken(toPtr int32, amount int64) int32 {
     // 转账示例函数
     // ...
 }
+
+// 私有函数 - 不导出
+func verifyTransaction(from, to Address, amount int64) bool {
+    // 验证逻辑
+    return true
+}
 ```
 
-合约的对外函数由开发者自行定义，这些函数构成了合约的公共API，可以被区块链交易调用。必须使用 `//export` 标记将函数导出为WebAssembly导出函数，编译系统会自动为这些函数生成适当的包装代码。
+合约的对外函数由开发者自行定义，这些函数构成了合约的公共API，可以被区块链交易调用。系统会自动识别所有大写字母开头的函数作为导出函数，无需开发者手动添加 `//export` 标记。导出规则遵循Go语言的公共/私有规范：
+- 大写字母开头的函数自动被视为公开函数，会被导出供外部调用
+- 小写字母开头的函数为私有函数，只能在合约内部使用
 
 ### 2.2 核心常量与宿主函数
 

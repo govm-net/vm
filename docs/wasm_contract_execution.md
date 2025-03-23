@@ -70,7 +70,13 @@ packageName, functions, err := maker.extractContractInfo(code)
 该步骤会：
 - 解析 Go 源码的包结构
 - 确定包名（package name）
-- 识别主要合约对外接口列表
+- 识别所有大写字母开头的函数作为导出函数
+- 自动收集所有导出函数的接口信息，无需开发者添加特殊注释
+
+系统会自动按照 Go 语言的公共/私有规则识别导出函数：
+- 大写字母开头的函数自动被视为导出函数（对外可调用）
+- 小写字母开头的函数为私有函数（仅内部使用）
+- 无需开发者手动添加 `//export` 标记
 
 ### 2.4 WASI 包装代码生成
 
@@ -650,7 +656,6 @@ flowchart TD
     F -- 是 --> G[自动注入调用者信息]
     G --> H[参数序列化]
     H --> I[记录资源使用]
-    I --> J[模拟堆栈跟踪]
     J --> E
     
     F -- 否 --> K[继续执行]
@@ -878,3 +883,240 @@ WebAssembly智能合约的编译、部署和执行流程是一个复杂但结构
 3. 精确的资源控制和限制
 4. 灵活的参数传递和结果处理机制
 5. 完善的错误处理和状态管理 
+
+## 11. RPC风格的合约接口调用机制
+
+为了提高合约接口调用的类型安全性和开发便捷性，系统可以采用类似Go标准库`net/rpc`的设计模式，实现自动化的参数反序列化和方法调用。
+
+### 11.1 Go RPC模型概述
+
+Go的RPC模型具有以下特点：
+
+```go
+// 服务定义
+type MathService struct{}
+
+// RPC方法 - 必须满足特定签名模式
+func (s *MathService) Add(args *Args, reply *int) error {
+    *reply = args.A + args.B
+    return nil
+}
+
+// 参数结构体
+type Args struct {
+    A, B int
+}
+```
+
+关键特性：
+- 方法必须是导出的（首字母大写）
+- 方法接收两个参数：请求和响应（指针类型）
+- 方法返回一个error类型
+- 参数和响应必须是可序列化的类型
+
+### 11.2 WebAssembly合约的RPC风格接口
+
+在合约编译阶段，系统可以自动为导出函数生成RPC风格的包装代码：
+
+```mermaid
+flowchart TD
+    A[分析Go合约源码] --> B[识别导出函数]
+    B --> C[为每个函数生成参数结构体]
+    C --> D[生成方法分发代码]
+    D --> E[生成序列化/反序列化代码]
+    
+    style A fill:#d0f0c0
+    style B fill:#d0f0c0
+    style C fill:#c0d0f0
+    style D fill:#c0d0f0
+    style E fill:#c0d0f0
+```
+
+### 11.3 自动生成的参数结构体
+
+系统会为每个导出函数自动生成对应的参数结构体：
+
+```go
+// 原始合约函数
+//export transfer
+func transfer(to Address, amount uint64) error {
+    // 实现转账逻辑
+}
+
+// 自动生成的参数结构体
+type TransferParams struct {
+    CallInfo *CallInfo `json:"call_info"` // 自动注入的调用链信息
+    To       Address   `json:"to"`        // 第一个参数
+    Amount   uint64    `json:"amount"`    // 第二个参数
+}
+
+// 自动生成的返回值结构体
+type TransferResult struct {
+    Error string `json:"error,omitempty"` // 错误信息（如果有）
+}
+```
+
+### 11.4 方法分发与反射
+
+系统在合约包装代码中生成统一的方法分发机制：
+
+```go
+// 自动生成的方法分发表
+var methodMap = map[string]func([]byte) []byte{
+    "transfer": wrapTransfer,
+    "approve": wrapApprove,
+    "balanceOf": wrapBalanceOf,
+    // ...其他方法
+}
+
+// 主分发函数
+func dispatchMethod(name string, paramsJSON []byte) []byte {
+    handler, exists := methodMap[name]
+    if !exists {
+        errorResult := &ErrorResult{Error: "method not found: " + name}
+        resultJSON, _ := json.Marshal(errorResult)
+        return resultJSON
+    }
+    
+    return handler(paramsJSON)
+}
+
+// 函数包装示例
+func wrapTransfer(paramsJSON []byte) []byte {
+    // 1. 反序列化参数
+    var params TransferParams
+    if err := json.Unmarshal(paramsJSON, &params); err != nil {
+        errorResult := &ErrorResult{Error: "failed to parse parameters: " + err.Error()}
+        resultJSON, _ := json.Marshal(errorResult)
+        return resultJSON
+    }
+    
+    // 2. 调用实际函数
+    err := transfer(params.To, params.Amount)
+    
+    // 3. 封装结果
+    result := &TransferResult{}
+    if err != nil {
+        result.Error = err.Error()
+    }
+    
+    // 4. 序列化返回结果
+    resultJSON, _ := json.Marshal(result)
+    return resultJSON
+}
+```
+
+### 11.5 类型安全的自动注册系统
+
+为了解决类型安全问题，系统可以实现反射型的类型注册与映射：
+
+```go
+// 类型注册表 - 用于复杂结构体的反序列化
+var typeRegistry = map[string]reflect.Type{
+    "Address": reflect.TypeOf(Address{}),
+    "ObjectID": reflect.TypeOf(ObjectID{}),
+    "TransferParams": reflect.TypeOf(TransferParams{}),
+    // ...其他类型
+}
+
+// 类型安全的反序列化
+func unmarshalWithType(data []byte, typeStr string) (interface{}, error) {
+    t, exists := typeRegistry[typeStr]
+    if !exists {
+        return nil, fmt.Errorf("unknown type: %s", typeStr)
+    }
+    
+    // 创建正确类型的新实例
+    v := reflect.New(t).Interface()
+    
+    // 反序列化到正确类型的实例
+    if err := json.Unmarshal(data, v); err != nil {
+        return nil, err
+    }
+    
+    return v, nil
+}
+```
+
+### 11.6 集成到编译流程
+
+这种RPC风格的接口处理会在合约编译阶段自动集成：
+
+```go
+func generateWASIWrapper(packageName string, functions []FunctionInfo, code []byte) string {
+    // 生成基础包装代码
+    wrapperTemplate := `
+package main
+
+import (
+    "encoding/json"
+    "reflect"
+    "{{ .PackageName }}"
+)
+
+// ...基础代码
+
+// 为每个函数生成参数和结果结构体
+{{ range .Functions }}
+type {{ .Name }}Params struct {
+    CallInfo *CallInfo {{ .ParamsFields }}
+}
+
+type {{ .Name }}Result struct {
+    {{ .ResultFields }}
+    Error string `json:"error,omitempty"`
+}
+{{ end }}
+
+// 生成方法分发代码
+var methodMap = map[string]func([]byte) []byte{
+{{ range .Functions }}
+    "{{ .Name }}": wrap{{ .Name }},
+{{ end }}
+}
+
+// 生成包装函数
+{{ range .Functions }}
+func wrap{{ .Name }}(paramsJSON []byte) []byte {
+    var params {{ .Name }}Params
+    if err := json.Unmarshal(paramsJSON, &params); err != nil {
+        // 错误处理
+    }
+    
+    // 调用实际函数
+    {{ .CallCode }}
+    
+    // 返回结果
+    {{ .ResultCode }}
+}
+{{ end }}
+
+// ...其他代码
+`
+    // 填充模板...
+}
+```
+
+### 11.7 优势与性能考虑
+
+这种基于Go RPC模型的实现提供了多项优势：
+
+1. **类型安全**：
+   - 严格保留参数类型信息
+   - 避免JSON反序列化默认将数字转为float64的问题
+   - 支持复杂嵌套结构体
+
+2. **开发便捷性**：
+   - 合约开发者无需手动处理序列化/反序列化
+   - 自动化的参数验证和错误处理
+   - 与标准Go编程模型一致
+
+3. **统一的调用模式**：
+   - 所有合约函数使用一致的调用模式
+   - 简化客户端调用代码
+   - 支持版本变更和接口升级
+
+4. **性能优化空间**：
+   - 预编译的反射路径减少运行时开销
+   - 缓存类型信息避免重复反射
+   - 可选的二进制序列化格式（如Protocol Buffers）支持
