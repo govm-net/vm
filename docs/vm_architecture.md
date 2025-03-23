@@ -1,438 +1,591 @@
-# VM 架构文档：基于 Go 语言的区块链智能合约虚拟机
+# VM 架构文档：基于 WebAssembly 的区块链智能合约执行系统
 
-## 概述
+## 1. 系统概述
 
-本虚拟机（VM）是一个专为区块链智能合约设计的执行环境，采用 Go 语言实现，结合了 GoVM 的一些设计理念和独特的状态管理模型。与传统的区块链虚拟机（如以太坊的 EVM）不同，本 VM 允许开发者直接使用 Go 语言编写智能合约，随后将其编译为 WebAssembly 格式执行，提供严格的安全保障和确定性执行环境。
+VM 系统是一个专为区块链智能合约设计的新型执行环境，采用 Go 语言实现，将智能合约编译为 WebAssembly 模块并通过 Wasmer 运行时执行。与传统的区块链虚拟机不同，该系统让开发者能够使用 Go 语言编写智能合约，同时享受 WebAssembly 带来的安全性、跨平台性和性能优势。
 
-## 核心设计理念
+### 1.1 核心设计理念
 
-VM 的设计基于以下关键理念：
+- **Go 智能合约 + WebAssembly 执行**：结合 Go 语言的安全性与 WebAssembly 的高效执行
+- **状态与逻辑分离**：采用无状态合约设计，逻辑与数据分离，提高系统弹性
+- **对象化状态模型**：所有状态通过对象表示，每个对象有唯一标识符和所有者
+- **透明的安全基础设施**：调用链追踪、权限控制等安全机制对开发者透明
+- **精细的资源控制**：对内存、执行时间和计算资源实施严格限制
 
-1. **Go 语言智能合约**：充分利用 Go 语言的类型安全、内存安全和高性能特性
-2. **WebAssembly 执行**：将 Go 合约编译为 WebAssembly 模块，通过 Wasmer 运行时执行
-3. **状态与逻辑分离**：采用类似 SUI 区块链的无状态合约设计，逻辑与数据分离
-4. **对象化状态模型**：所有状态通过对象表示，每个对象有唯一标识符和所有者
-5. **严格安全限制**：限制危险操作，确保合约执行的安全性和确定性
-6. **参数编码/解码系统**：完善的参数处理机制，支持复杂数据类型
-7. **跨平台兼容性**：通过 WebAssembly 支持在不同环境中运行相同合约代码
-8. **精细的资源控制**：对内存、执行时间和计算资源进行严格限制
-
-## 系统架构
-
-VM 的架构分为三个主要层次：
-
-### 1. 核心层 (core 包)
-
-定义基础接口和类型：
-
-```
-contract_interface.go  # 核心接口定义：Context, Object, Address, ObjectID
-```
-
-主要接口：
-
-- **Context**：合约执行上下文，提供区块链状态访问、合约间调用和对象管理
-- **Object**：状态对象接口，提供字段存取和所有权管理
-- **Address**：20 字节的地址类型，表示合约地址或用户地址
-- **ObjectID**：32 字节的对象标识符
-
-### 2. 虚拟机实现 (vm 包)
-
-实现核心功能：
-
-```
-vm/
-├── engine.go       # 主要VM实现
-├── dbobject.go     # 数据库支持的状态对象
-├── dbkeys.go       # 数据库键生成工具
-├── engine_test.go  # 测试用例
-├── api/            # 外部接口定义
-├── wasi/           # WebAssembly 系统接口实现
-└── runtime/        # 运行时支持
-    ├── maker.go        # 合约验证、编译和实例化
-    └── maker_test.go   # 测试用例
-```
-
-主要组件：
-
-- **Engine**：VM 的主要实现，处理合约的部署和执行
-- **ExecutionContext**：Context 接口的实现，提供合约执行环境
-- **MStateObject/DBStateObject**：Object 接口的内存和数据库实现
-- **WasmEngine**：负责 WebAssembly 模块的加载和执行
-- **WASI**：WebAssembly 系统接口的实现和支持
-
-### 3. 合约示例 (contracts 包)
-
-提供示例合约和模板：
-
-```
-examples/
-├── token.go     # 代币合约示例
-└── nft.go       # NFT合约示例
-```
-
-## 执行流程
-
-VM 使用 WebAssembly (WASI) 模式执行智能合约，整个流程如下：
-
-### 1. 合约部署流程
-
-合约部署通过 `engine.DeployWithOptions` 方法完成，该方法将 Go 源码转换为 WebAssembly 模块并存储在系统中。整个流程可以细分为以下八个关键步骤：
-
-#### 1.1 源码接收与解压
-
-首先，系统接收合约源码并检查是否使用了压缩格式：
-
-```go
-// 检查源码是否使用 GZIP 压缩
-if isGzipCompressed(code) {
-    code, err = decompressGzip(code)
-    if err != nil {
-        return core.ZeroAddress(), fmt.Errorf("failed to decompress contract code: %w", err)
-    }
-}
-```
-
-这一步确保系统能处理压缩后提交的合约，减少网络传输开销。
-
-#### 1.2 源码验证
-
-接下来，系统对合约源码进行严格验证：
-
-```go
-// 验证合约源码
-if err := maker.ValidateContract(code); err != nil {
-    return core.ZeroAddress(), fmt.Errorf("contract validation failed: %w", err)
-}
-```
-
-验证过程包含多重检查：
-- **导入检查**：确保合约只导入允许的包（如 `github.com/govm-net/vm`）
-- **关键字检查**：禁止使用可能导致非确定性行为的 Go 关键字（如 `go`, `select`, `recover`）
-- **大小限制**：确保合约代码不超过配置的最大大小
-- **结构检查**：验证合约包含至少一个导出（公开）函数
-- **语法检查**：确保 Go 代码语法正确，没有编译错误
-
-#### 1.3 合约信息提取
-
-验证通过后，系统使用 Go 的 AST（抽象语法树）分析工具提取关键信息：
-
-```go
-// 提取包名和合约对外函数列表
-packageName, functions, err := maker.extractContractInfo(code)
-```
-
-该步骤会：
-- 解析 Go 源码的包结构
-- 确定包名（package name）
-- 识别主要合约对外接口列表
-  - 函数名
-  - 函数参数列表
-- 分析函数声明，建立合约接口映射
-
-#### 1.4 WASI 包装代码生成
-
-要让 Go 合约能够与 WebAssembly 系统接口通信，系统会生成专用的包装代码：
-
-```go
-// 生成 WASI 接口包装代码
-wrapperCode := generateWASIWrapper(packageName, functions, code)
-```
-
-包装代码提供以下功能：
-- 创建与 WebAssembly 主机系统的通信桥梁
-- 实现内存管理接口（分配/释放）
-- 设置参数传递和结果返回机制
-- 处理 WASI 环境变量和文件系统接口
-- 实现错误处理和异常捕获机制
-
-#### 1.5 编译环境准备
-
-在执行编译前，系统会创建完整的编译环境：
-
-```go
-// 准备编译环境
-tempDir, err := prepareCompilationEnvironment(code, wrapperCode)
-```
-
-这一步会：
-- 创建临时目录结构
-- 构建正确的 Go 模块环境
-- 设置必要的依赖关系
-- 配置编译参数和环境变量
-
-#### 1.6 TinyGo 编译
-
-准备就绪后，系统使用 TinyGo 编译器将 Go 代码编译为 WebAssembly 模块：
-
-```go
-// 使用 TinyGo 编译为 WebAssembly
-wasmCode, err := compileWithTinyGo(tempDir, options.WASIOptions)
-```
-
-编译命令示例：
-```bash
-tinygo build -o contract.wasm -target=wasi -opt=z -no-debug -gc=leaking ./main.go
-```
-
-编译选项说明：
-- `-target=wasi`: 指定编译目标为 WebAssembly 系统接口
-- `-opt=z`: 优化输出大小，减小 WASM 模块体积
-- `-no-debug`: 移除调试信息，进一步减小文件大小
-- `-gc=leaking`: 使用简化的垃圾收集器，提高运行时性能
-
-#### 1.7 模块优化与验证
-
-编译后，系统会验证生成的 WebAssembly 模块并可能进行进一步优化：
-
-```go
-// 验证和优化 WebAssembly 模块
-wasmCode, err = optimizeWasmModule(wasmCode)
-```
-
-这一步确保：
-- WASM 模块格式正确（以魔数 `\0asm` 开头）
-- 模块结构完整且有效
-- 必要的导出函数存在
-- 可能的性能和大小优化已应用
-
-#### 1.8 存储与注册
-
-最后，系统将编译好的 WebAssembly 模块存储到指定位置并注册到系统中：
-
-```go
-// 生成合约地址
-contractAddr := generateContractAddress(wasmCode)
-
-// 存储到文件系统
-wasmPath := filepath.Join(config.WASIContractsDir, contractAddr.String()+".wasm")
-os.WriteFile(wasmPath, wasmCode, 0644)
-
-// 注册合约信息
-engine.contracts[contractAddr] = wasmPath
-```
-
-完成这些步骤后，系统返回生成的合约地址，供后续调用使用。
-
-#### 流程图示
+### 1.2 主要功能特性
 
 ```mermaid
 flowchart TD
-    A[接收合约源码] --如果需要--> B[解压缩]
-    B --> C[验证合约源码]
-    A --> C
-    C --> D[检查语法和限制]
-    D --> E[分析 Go 代码结构]
-    E --> F[提取合约信息]
-    F --> G[生成 WASI 包装]
-    G --> H[准备编译环境]
-    H --> I[设置模块依赖]
-    I --> J[TinyGo 编译]
-    J --> K[优化 WASM 模块]
-    K --> L[验证模块有效性]
-    L --> M[存储 WASM 模块]
-    M --> N[注册合约信息]
-    N --> O[返回合约地址]
+    A[VM执行系统] --> B[合约编译系统]
+    A --> C[状态管理系统]
+    A --> D[调用链追踪]
+    A --> E[资源控制]
+    A --> F[安全沙箱]
+    
+    B --> B1[Go源码验证]
+    B --> B2[WebAssembly编译]
+    B --> B3[自动接口生成]
+    
+    C --> C1[对象化状态]
+    C --> C2[数据库存储]
+    C --> C3[权限管理]
+    
+    D --> D1[透明的调用链记录]
+    D --> D2[安全审计]
+    
+    E --> E1[内存限制]
+    E --> E2[执行时间控制]
+    E --> E3[指令计数限制]
+    
+    F --> F1[WASI环境]
+    F --> F2[内存安全]
+    F --> F3[隔离执行]
 ```
 
-### 2. WebAssembly 执行流程
+## 2. 系统架构
 
-合约部署完成后，可以通过合约地址执行合约中的函数。执行流程如下：
+VM 系统架构采用分层设计，每一层都有明确的职责和接口：
+
+### 2.1 整体架构层次
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                  应用层 (Application Layer)                 │
+│                                                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
+│  │  智能合约示例  │  │ CLI工具     │  │ 区块链集成接口    │    │
+│  └─────────────┘  └─────────────┘  └─────────────────┘    │
+└───────────────────────────────────────────────────────────┘
+                            ▲
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────┐
+│                  核心层 (Core Layer)                        │
+│                                                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
+│  │   API接口    │  │  虚拟机引擎  │  │   状态管理系统   │    │
+│  └─────────────┘  └─────────────┘  └─────────────────┘    │
+└───────────────────────────────────────────────────────────┘
+                            ▲
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────┐
+│               执行环境层 (Execution Layer)                  │
+│                                                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
+│  │  WASM编译器  │  │ Wasmer运行时 │  │ WASI系统接口    │    │
+│  └─────────────┘  └─────────────┘  └─────────────────┘    │
+└───────────────────────────────────────────────────────────┘
+                            ▲
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────┐
+│               存储与基础设施层 (Storage Layer)               │
+│                                                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
+│  │  数据库存储   │  │  文件系统   │  │   资源监控      │    │
+│  └─────────────┘  └─────────────┘  └─────────────────┘    │
+└───────────────────────────────────────────────────────────┘
+```
+
+### 2.2 详细代码结构
+
+新的目录结构更加清晰地反映了系统的各个组件及其关系，并且对合约开发者隐藏了不必要的复杂性：
+
+```
+govm-net/vm/
+├── cmd/                        # 命令行工具
+│   ├── vm-cli/                 # VM管理命令行工具
+│   └── contract-compiler/      # 合约编译工具
+│
+├── core/                       # 核心接口定义（面向合约开发者）
+│   └── interface.go            # 合约所需的核心接口定义(Context, Object)
+│
+├── types/                      # 基础类型定义（内部使用）
+│   ├── address.go              # 地址类型实现
+│   ├── objectid.go             # 对象ID类型实现
+│   ├── common.go               # 通用类型定义
+│   └── errors.go               # 错误类型定义
+│
+├── api/                        # API接口定义（面向平台集成者）
+│   ├── contract_api.go         # 合约API接口
+│   ├── system_api.go           # 系统API接口
+│   └── config.go               # 配置接口
+│
+├── compiler/                   # 合约编译系统
+│   ├── validator.go            # 源码验证
+│   ├── tinygo.go               # TinyGo编译集成
+│   ├── wasm_optimizer.go       # WASM优化工具
+│   └── wrapper_generator.go    # WASI包装代码生成
+│
+├── vm/                         # 虚拟机实现
+│   ├── engine.go               # VM引擎主实现
+│   ├── execution_context.go    # 执行上下文实现
+│   └── wasm_engine.go          # WebAssembly执行引擎
+│
+├── state/                      # 状态管理系统
+│   ├── object.go               # 对象接口实现
+│   ├── db_object.go            # 数据库对象实现
+│   ├── memory_object.go        # 内存对象实现
+│   └── state_manager.go        # 状态管理器
+│
+├── wasi/                       # WebAssembly系统接口
+│   ├── env.go                  # WASI环境变量
+│   ├── filesystem.go           # 文件系统接口
+│   ├── memory.go               # 内存管理
+│   └── imports.go              # 导入函数实现
+│
+├── security/                   # 安全系统
+│   ├── call_tracer.go          # 调用链追踪
+│   ├── permissions.go          # 权限控制
+│   └── resource_limiter.go     # 资源限制器
+│
+├── utils/                      # 工具库
+│   ├── serialization.go        # 参数序列化
+│   ├── wasm_utils.go           # WASM辅助工具
+│   └── crypto.go               # 加密工具
+│
+└── examples/                   # 示例合约
+    ├── token/                  # 代币合约
+    ├── counter/                # 计数器示例
+    └── nft/                    # NFT合约示例
+```
+
+## 3. 核心组件详解
+
+### 3.1 合约接口系统
+
+VM系统提供了精简的接口系统，仅暴露合约开发者需要的核心接口，隐藏内部实现细节：
+
+#### 3.1.1 核心接口设计理念
+
+对合约开发者而言，VM系统采取了"最小接口表面积"原则，只在`core/interface.go`中暴露必要的两个接口：
+
+1. **Context接口**：为合约提供与区块链环境交互的能力
+2. **Object接口**：为合约提供操作状态对象的能力
+
+这种设计大大简化了合约开发者的学习曲线，使他们能够专注于业务逻辑而不是系统细节。开发者只需导入单一的`github.com/govm-net/vm/core`包，即可获得编写合约所需的全部接口定义。系统的所有复杂性都被封装在这两个简洁的接口背后，使得合约开发变得简单直观。
+
+```go
+import "github.com/govm-net/vm/core"
+
+// 在合约中使用Context和Object接口
+func MyContractFunction(ctx core.Context, param string) (core.ObjectID, error) {
+    // 使用Context和Object接口完成合约逻辑
+}
+```
+
+#### 3.1.2 Context接口
+
+Context是合约与区块链环境交互的主要接口：
+
+```go
+// Context 接口定义
+type Context interface {
+    // 区块链信息相关
+    BlockHeight() uint64          // 获取当前区块高度
+    BlockTime() int64             // 获取当前区块时间戳
+    ContractAddress() Address     // 获取当前合约地址
+    
+    // 账户操作相关
+    Sender() Address              // 获取交易发送者或调用合约
+    Balance(addr Address) uint64  // 获取账户余额
+    Transfer(to Address, amount uint64) error // 转账操作
+    
+    // 对象存储相关 - 基础状态操作使用panic而非返回error
+    CreateObject() Object                      // 创建新对象，失败时panic
+    GetObject(id ObjectID) (Object, error)     // 获取指定对象，可能返回error
+    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+    DeleteObject(id ObjectID)                  // 删除对象，失败时panic
+    
+    // 跨合约调用
+    Call(contract Address, function string, args ...any) ([]byte, error)
+    
+    // 日志与事件
+    Log(eventName string, keyValues ...interface{}) // 记录事件
+}
+```
+
+#### 3.1.3 Object接口
+
+Object接口用于管理区块链状态对象：
+
+```go
+// Object 接口定义
+type Object interface {
+    ID() ObjectID           // 获取对象ID
+    Owner() Address         // 获取对象所有者
+    SetOwner(addr Address)  // 设置对象所有者，失败时panic
+    
+    // 字段操作
+    Get(field string, value any) error  // 获取字段值
+    Set(field string, value any) error  // 设置字段值
+}
+```
+
+### 3.2 WebAssembly执行环境
+
+VM系统使用WebAssembly作为智能合约的执行环境，确保安全、高效和跨平台兼容。所有这些细节对合约开发者透明，他们只需要关注core接口，无需理解WebAssembly的内部工作机制：
+
+#### 3.2.1 合约编译流程
+
+将Go源码转换为WebAssembly模块的流程：
 
 ```mermaid
 flowchart TD
-    A[接收执行请求] --> B[检查合约类型]
-    B --> C[准备执行参数]
-    C --> D[序列化为二进制格式]
-    D --> E[初始化Wasmer运行时]
-    E --> F[加载WASM模块]
-    F --> G[设置资源限制]
-    G --> H[执行入口函数]
-    H --> I[读取执行结果]
-    I --> J[返回执行结果]
+    A[Go源码接收] --> B[源码验证]
+    B --> C[提取合约信息]
+    C --> D[生成WASI包装代码]
+    D --> E[准备编译环境]
+    E --> F[TinyGo编译]
+    F --> G[WASM优化]
+    G --> H[模块验证]
+    H --> I[存储并注册]
+    I --> J[返回合约地址]
+    
+    subgraph 验证阶段
+        A
+        B
+    end
+    
+    subgraph 准备阶段
+        C
+        D
+        E
+    end
+    
+    subgraph 编译阶段
+        F
+        G
+        H
+    end
+    
+    subgraph 部署阶段
+        I
+        J
+    end
 ```
 
-1. **参数准备阶段**：将参数序列化为适合 WebAssembly 的格式
-2. **初始化阶段**：设置 Wasmer 运行时环境和模块
-3. **资源控制**：设置内存限制、执行时间限制和指令计数限制
-4. **执行阶段**：在受限的 WebAssembly 沙箱环境中执行合约
-5. **结果处理阶段**：从 WebAssembly 内存中读取执行结果并反序列化
+#### 3.2.2 执行流程
 
-### 3. 内存和状态交互
+WebAssembly合约的执行流程：
 
 ```mermaid
 flowchart LR
-    A[VM主进程] -- "传递参数\n控制执行" --> B[Wasmer运行时]
-    B -- "返回结果" --> A
+    A[接收执行请求] --> B[加载WASM模块]
+    B --> C[设置资源限制]
+    C --> D[准备执行参数]
+    D --> E[执行合约函数]
+    E --> F[处理执行结果]
+    F --> G[返回结果]
     
-    C[VM状态存储] -- "读取状态" --> B
-    B -- "写入状态" --> C
+    subgraph Wasmer运行时环境
+        B
+        C
+        D
+        E
+    end
+```
+
+### 3.3 调用链追踪机制
+
+调用链追踪是一个透明的底层基础设施，为智能合约系统提供关键的安全保障，无需开发者感知：
+
+```mermaid
+flowchart TD
+    A[用户] --> B[合约A]
+    B --> C[合约B]
+    C --> D[合约C]
     
-    D[VM内存管理] -- "分配内存" --> B
-    B -- "请求内存" --> D
+    subgraph 调用链追踪（底层机制）
+        B1[自动记录] --- B
+        C1[自动记录] --- C
+        D1[自动记录] --- D
+    end
+    
+    style A fill:#f9f,stroke:#333
+    style B fill:#bbf,stroke:#333
+    style C fill:#bbf,stroke:#333
+    style D fill:#bbf,stroke:#333
 ```
 
-WebAssembly 模块通过导入函数与 VM 系统交互：
-- **内存管理函数**：分配、读取和写入 WASM 内存
-- **状态读写函数**：访问和修改区块链状态
-- **上下文信息函数**：获取发送方地址、区块高度等上下文信息
+#### 3.3.1 自动插桩
 
-## 状态管理模型
-
-VM 支持两种类型的状态对象：
-
-1. **内存状态对象 (StateObject)**：
-   - 数据存储在内存中
-   - 适用于临时状态或测试
-   - 比如：交易有效性验证
-
-2. **数据库状态对象 (DBStateObject)**：
-   - 数据持久化在数据库中
-   - 支持按所有者索引和查询
-   - 使用前缀键系统组织数据
-
-### 数据库状态键结构
-
-```
-对象元数据：'o' + 对象ID -> 对象元数据(ID, 类型, 所有者)
-字段值：'f' + 对象ID + 字段名 -> 字段值
-```
-
-## 安全机制
-
-VM 实现了多层安全机制：
-
-1. **代码验证**：
-   - 检查禁止的导入包
-   - 限制危险关键字使用（go、select、range等）
-   - 验证合约大小
-
-2. **WebAssembly 沙箱**：
-   - WASM 提供的内存安全和沙箱执行环境
-   - 禁止直接访问文件系统和网络
-   - 内存隔离，防止内存泄露和溢出攻击
-
-3. **资源限制**：
-   - 内存使用限制
-   - 执行时间限制
-   - 指令计数限制（fuel）
-   - 调用堆栈深度限制
-
-4. **类型安全**：
-   - 严格参数类型检查
-   - 安全的编码/解码机制
-
-## 与 GoVM 的比较
-
-本 VM 借鉴了 GoVM 的一些设计概念，但有一些关键区别：
-
-### 相似点
-- 基于 Go 语言实现
-- 支持 Go 编写的智能合约
-- 强调安全性和确定性执行
-
-### 区别
-- **代码执行方式**：
-  - GoVM 主要依赖独立进程执行
-  - 本 VM 使用 WebAssembly 执行，提供更好的跨平台性和安全性
-  
-- **状态模型**：
-  - GoVM 使用键值存储管理状态
-  - 本 VM 采用无状态合约和对象化状态，类似 SUI 区块链
-  
-- **能量/资源系统**：
-  - GoVM 有更完善的能量系统，在编译时注入计费代码
-  - 本 VM 使用 WebAssembly 内置的资源控制机制，更加灵活和可靠
-  
-- **通信机制**：
-  - GoVM 通过数据库进行合约间通信
-  - 本 VM 使用 WASI 导入函数和内存映射传递参数和结果
-
-## 合约开发指南
-
-### 合约结构示例
+系统在编译阶段自动在代码中插入调用链追踪代码，对开发者完全透明：
 
 ```go
-package mycontract
-
-import (
-    "github.com/govm-net/vm/core"
-)
-
-// 初始化函数 - 部署时调用
-func Initialize(ctx core.Context, initialValue string) (core.ObjectID, error) {
-    // 创建一个数据对象 - 基础状态操作，失败时会panic
-    dataObj := ctx.CreateObject()
-    
-    // 设置初始值
-    err := dataObj.Set("value", initialValue)
-    if err != nil {
-        return core.ObjectID{}, err
-    }
-    
-    // 返回对象ID供后续使用
-    return dataObj.ID(), nil
+// 原始合约代码（开发者视角）
+func Transfer(to Address, amount uint64) error {
+    // 业务逻辑...
 }
 
-// 公共函数 - 读取值
-func GetValue(ctx core.Context, dataObjectID core.ObjectID) (string, error) {
-    // 获取数据对象
-    dataObj, err := ctx.GetObject(dataObjectID)
-    if err != nil {
-        return "", err
-    }
+// 系统自动插桩后的代码（系统内部实现，开发者不可见）
+func Transfer(to Address, amount uint64) error {
+    // 自动插入的调用链记录代码
+    // 对开发者完全透明
     
-    // 读取值
-    value, err := dataObj.Get("value")
-    if err != nil {
-        return "", err
-    }
-    
-    return value.(string), nil
-}
-
-// 公共函数 - 设置值
-func SetValue(ctx core.Context, dataObjectID core.ObjectID, newValue string) (bool, error) {
-    // 获取数据对象
-    dataObj, err := ctx.GetObject(dataObjectID)
-    if err != nil {
-        return false, err
-    }
-    
-    // 更新值
-    err = dataObj.Set("value", newValue)
-    if err != nil {
-        return false, err
-    }
-    
-    // 记录事件
-    ctx.Log("ValueChanged", dataObjectID, newValue)
-    
-    return true, nil
+    // 原始业务逻辑...
 }
 ```
 
-### 最佳实践
+### 3.4 资源控制系统
 
-1. **无状态设计**：合约不应存储状态，而是操作外部对象
-2. **权限检查**：验证调用者是否有权执行操作
-3. **错误处理**：提供明确的错误信息
-4. **事件记录**：使用 Log 方法记录重要操作
-5. **类型安全**：利用 Go 的类型系统确保正确性
-6. **考虑 TinyGo 兼容性**：注意 TinyGo 编译器的限制，避免使用不支持的功能
-7. **内存效率**：优化内存使用，避免大量临时对象创建
+WebAssembly执行环境提供精细的资源控制机制：
 
-## 未来发展方向
+```go
+// WebAssembly资源限制选项
+type WASIOptions struct {
+    MemoryLimit     uint64    // 内存限制 (字节)
+    TableSize       uint64    // 函数表大小
+    Timeout         uint64    // 执行超时 (毫秒)
+    FuelLimit       uint64    // 指令计数限制
+    StackSize       uint64    // 栈大小 (字节)
+    EnableSIMD      bool      // 是否启用SIMD指令
+    EnableThreads   bool      // 是否启用线程
+    EnableBulkMemory bool     // 是否启用批量内存操作
+}
+```
+
+### 3.5 接口可见性设计
+
+VM系统采用了精心设计的接口可见性策略，为不同的用户群体提供恰当的抽象级别：
+
+| 用户群体 | 可见接口 | 隐藏内容 | 设计目的 |
+|---------|---------|---------|---------|
+| 合约开发者 | core/interface.go | 内部实现、类型定义、API细节 | 降低学习门槛，聚焦业务逻辑 |
+| 平台集成者 | api/目录下接口 | 内部实现细节 | 提供灵活的集成选项 |
+| 系统开发者 | 全部代码 | 无 | 允许系统级扩展和定制 |
+
+这种分层的接口可见性设计确保了每类用户只需关注其所需的复杂度级别，显著提高了开发效率和系统可用性。对合约开发者而言，只需了解core/interface.go中定义的两个接口即可开始编写功能完备的智能合约。
+
+## 4. 状态管理系统
+
+### 4.1 对象化状态模型
+
+VM系统采用对象化状态模型，所有状态通过对象表示：
+
+```mermaid
+flowchart TD
+    A[合约函数] --> B[创建/获取对象]
+    B --> C{所有权检查}
+    C -- 通过 --> D[操作对象状态]
+    C -- 失败 --> E[权限错误]
+    D --> F[持久化状态]
+    
+    subgraph 对象生命周期
+        B
+        D
+        F
+    end
+```
+
+### 4.2 数据库存储模型
+
+持久化状态存储采用键值数据库模型：
+
+```
+对象元数据：'o' + 对象ID -> 对象元数据(ID, 所有者)
+字段值：'f' + 对象ID + 字段名 -> 字段值
+所有者索引：'w' + 所有者地址 + 对象ID -> 空值（用于快速查询）
+```
+
+## 5. 安全机制
+
+VM系统实现了多层安全机制：
+
+### 5.1 代码安全
+
+- **源码验证**：检查禁止的导入包、危险关键字和合约大小
+- **自动插桩**：编译期自动注入安全检查代码
+- **类型安全**：利用Go语言的类型系统和严格的参数检查
+
+### 5.2 执行安全
+
+- **WebAssembly沙箱**：合约在隔离环境中执行，无法直接访问主机系统
+- **内存隔离**：WebAssembly提供的内存安全保障
+- **权限控制**：所有敏感操作都有权限检查
+
+### 5.3 资源控制
+
+- **内存限制**：控制合约可使用的最大内存
+- **执行时间限制**：防止无限循环
+- **指令计数限制**：通过燃料系统控制执行成本
+- **深度限制**：限制调用栈深度，防止栈溢出
+
+## 6. WebAssembly 优势
+
+### 6.1 性能优势
+
+- **接近原生速度**：执行速度接近原生代码，远超解释执行
+- **高效内存模型**：线性内存模型减少间接访问开销
+- **编译优化**：支持JIT和AOT编译
+- **低调用开销**：函数调用和参数传递开销小
+
+### 6.2 安全优势
+
+- **内存安全**：内置的内存边界检查
+- **沙箱执行**：完全隔离的执行环境
+- **确定性**：相同输入产生相同结果
+- **资源控制**：精确控制合约资源使用
+
+### 6.3 兼容性优势
+
+- **跨平台**：在任何支持WebAssembly的环境中执行
+- **环境独立**：不依赖特定操作系统或硬件
+- **版本稳定**：WebAssembly规范稳定，保证长期兼容性
+
+## 7. 合约开发最佳实践
+
+### 7.1 合约设计原则
+
+- **专注核心接口**：仅依赖core/interface.go中定义的Context和Object接口，不依赖任何实现细节
+- **无状态设计**：合约逻辑不存储状态，而是操作外部对象
+- **所有权检查**：验证交易发送者是否有权执行操作
+- **错误处理**：提供清晰的错误信息，区分系统错误和业务错误
+- **事件记录**：记录关键状态变更，便于审计和追踪
+
+### 7.2 简化的合约开发流程
+
+VM系统设计遵循"简单胜于复杂"的原则，为合约开发者提供极简的开发流程：
+
+1. **单一接口文件**：整个合约开发只需关注core/interface.go中定义的接口
+   ```go
+   import "github.com/govm-net/vm/core"
+   ```
+
+2. **两个核心接口**：所有合约功能都通过Context和Object接口访问
+   ```go
+   func Initialize(ctx core.Context) (core.ObjectID, error) {
+       obj := ctx.CreateObject()
+       // ... 业务逻辑 ...
+       return obj.ID(), nil
+   }
+   ```
+
+3. **专注业务逻辑**：开发者只需专注于业务逻辑实现，无需了解底层WebAssembly细节
+   ```go
+   func Transfer(ctx core.Context, to core.Address, amount uint64) error {
+       // 仅关注业务逻辑，底层细节由VM系统处理
+       // ...
+   }
+   ```
+
+### 7.3 性能优化
+
+- **减少内存分配**：重用缓冲区，避免频繁分配
+- **减少跨合约调用**：合并相关操作，减少调用次数
+- **批量操作**：使用批量操作代替多次单独操作
+- **优化数据结构**：选择合适的数据结构，减少操作复杂度
+
+### 7.4 TinyGo兼容性考虑
+
+- **标准库限制**：注意TinyGo对标准库支持的限制
+- **内存管理**：设计合理的对象生命周期
+- **简化类型**：避免复杂的泛型和接口类型断言
+
+### 7.5 简洁合约示例
+
+以下是一个遵循最佳实践的简洁合约示例，展示了如何只使用core/interface.go中的接口进行开发：
+
+```go
+package simpletoken
+
+import "github.com/govm-net/vm/core"
+
+// Initialize 创建一个简单的代币合约
+func Initialize(ctx core.Context, name string, totalSupply uint64) (core.ObjectID, error) {
+    // 创建代币信息对象
+    infoObj := ctx.CreateObject()
+    infoObj.Set("name", name)
+    infoObj.Set("total_supply", totalSupply)
+    
+    // 创建发行者余额对象
+    balanceObj := ctx.CreateObject()
+    balanceObj.Set("balance", totalSupply)
+    balanceObj.SetOwner(ctx.Sender())
+    
+    // 记录初始化事件
+    ctx.Log("TokenInitialized", "name", name, "total_supply", totalSupply)
+    
+    return infoObj.ID(), nil
+}
+
+// Transfer 在账户间转移代币
+func Transfer(ctx core.Context, to core.Address, amount uint64) error {
+    // 获取发送者余额对象
+    senderObj, err := ctx.GetObjectWithOwner(ctx.Sender())
+    if err != nil {
+        return err
+    }
+    
+    // 检查余额
+    var balance uint64
+    if err := senderObj.Get("balance", &balance); err != nil {
+        return err
+    }
+    
+    if balance < amount {
+        return fmt.Errorf("insufficient balance")
+    }
+    
+    // 更新发送者余额
+    if err := senderObj.Set("balance", balance - amount); err != nil {
+        return err
+    }
+    
+    // 处理接收者余额
+    receiverObj, err := ctx.GetObjectWithOwner(to)
+    if err != nil {
+        // 接收者没有余额对象，创建一个
+        receiverObj = ctx.CreateObject()
+        receiverObj.SetOwner(to)
+        receiverObj.Set("balance", amount)
+    } else {
+        // 更新接收者余额
+        var rcvBalance uint64
+        if err := receiverObj.Get("balance", &rcvBalance); err != nil {
+            return err
+        }
+        if err := receiverObj.Set("balance", rcvBalance + amount); err != nil {
+            return err
+        }
+    }
+    
+    // 记录转账事件
+    ctx.Log("Transfer", "from", ctx.Sender(), "to", to, "amount", amount)
+    
+    return nil
+}
+```
+
+这个示例展示了如何仅使用Context和Object接口实现完整的代币合约功能，无需引入其他依赖或了解系统内部实现细节。
+
+## 8. 未来发展方向
 
 1. **增强的资源计费系统**：实现更精细的资源使用计量和限制
-2. **更多预定义合约模板**：提供更多常用合约类型
+2. **更多预定义合约模板**：提供更多常用合约类型的模板
 3. **改进部署流程**：增强合约代码的验证和安全检查
-4. **支持复杂数据类型**：扩展参数编码/解码系统
+4. **支持复杂数据类型**：扩展参数编码/解码系统的能力
 5. **状态管理优化**：改进数据库索引和查询效率
-6. **WebAssembly 优化**：改进 WASI 模块的性能和大小
-7. **跨平台兼容性**：增强在各种环境中的部署选项
-8. **形式化验证**：提供合约行为的形式化验证工具
+6. **WebAssembly 优化**：持续改进WASM模块的性能和大小
+7. **跨平台工具链**：提供更完善的开发、测试和部署工具
+8. **形式化验证**：引入智能合约的形式化验证工具
 
-## 总结
+## 9. 总结
 
-VM 提供了一个高效、安全且跨平台的智能合约执行环境，通过将 Go 语言智能合约编译为 WebAssembly 模块并使用 Wasmer 运行时执行，实现了理想的性能和安全平衡。无状态合约设计和对象化状态管理方式让智能合约开发既灵活又高效，适合各种区块链应用场景。WebAssembly 执行模式的采用进一步增强了跨平台兼容性和资源控制能力，使 VM 成为构建下一代区块链应用的理想平台。 
+VM系统通过结合Go语言的安全性和WebAssembly的执行效率，构建了一个高性能、安全且跨平台的智能合约执行环境。透明的调用链追踪、严格的资源控制和对象化的状态管理使系统既安全又灵活，适合构建各种复杂的区块链应用。
+
+系统的模块化设计和清晰的接口定义使其易于扩展和集成到不同的区块链平台，同时WebAssembly执行模式确保了合约的长期可维护性和跨平台兼容性。通过持续优化和扩展功能，VM系统将成为下一代区块链应用的理想基础设施。
+
+## 10. 开发流程比较
+
+为了展示VM系统简化的合约开发体验，以下对比了使用不同区块链平台开发智能合约的差异：
+
+| 平台 | 开发语言 | 需要学习的概念 | 接口复杂度 | 调试难度 | 主要优势 |
+|------|---------|--------------|-----------|---------|---------|
+| VM系统 | Go | Context和Object接口 | 低 | 低 | 简单、熟悉的Go语言，无需学习新概念 |
+| 以太坊 | Solidity | 账户模型、Gas、ABI等 | 中 | 高 | 生态系统成熟，工具丰富 |
+| Cosmos | Go | Keeper、SDK、模块等 | 高 | 中 | 灵活的应用链定制能力 |
+| Solana | Rust | 账户、指令、程序等 | 高 | 高 | 高性能、高并发 |
+
+VM系统通过极简的接口设计，大大降低了合约开发的门槛，使开发者能够专注于业务逻辑而非平台细节。这一设计理念体现在整个开发流程中，从编写合约到测试部署，每个环节都保持了简洁性和清晰性。 
