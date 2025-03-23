@@ -24,6 +24,7 @@ import (
 )
 
 // Initialize 初始化代币合约，创建初始供应量
+//export Initialize
 func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
     // 创建代币发行者的余额对象
     balanceObj, err := ctx.CreateObject()
@@ -46,6 +47,7 @@ func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
 }
 
 // Transfer 在账户之间转移代币
+//export Transfer
 func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
     // 获取发送方余额对象
     fromBalance, err := ctx.GetObjectWithOwner(ctx.Sender())
@@ -53,16 +55,20 @@ func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
         return fmt.Errorf("failed to get sender balance: %w", err)
     }
 
-    // 获取接收方余额对象
-    toBalance, err := ctx.CreateObject()
+    // 获取接收方余额对象（如果不存在则创建）
+    toBalance, err := ctx.GetObjectWithOwner(to)
     if err != nil {
-        return fmt.Errorf("failed to get receiver balance: %w", err)
+        // 不存在则创建新对象
+        toBalance, err = ctx.CreateObject()
+        if err != nil {
+            return fmt.Errorf("failed to create receiver balance: %w", err)
+        }
+        toBalance.SetOwner(to)
     }
 
     // 读取当前余额
     var fromAmount uint64
-    err := fromBalance.Get("amount",&fromAmount)
-    if err != nil {
+    if err := fromBalance.Get("amount", &fromAmount); err != nil {
         return fmt.Errorf("failed to get sender amount: %w", err)
     }
 
@@ -71,37 +77,46 @@ func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
         return fmt.Errorf("insufficient balance: %d < %d", fromAmount, amount)
     }
 
-    // 更新双方余额
+    // 更新发送方余额
     if err := fromBalance.Set("amount", fromAmount-amount); err != nil {
         return fmt.Errorf("failed to update sender balance: %w", err)
     }
 
-    if err := toBalance.Set("amount", amount); err != nil {
-        return fmt.Errorf("failed to update receiver balance: %w", err)
+    // 读取并更新接收方余额
+    var toAmount uint64
+    if err := toBalance.Get("amount", &toAmount); err == nil {
+        // 如果读取成功，更新现有余额
+        if err := toBalance.Set("amount", toAmount+amount); err != nil {
+            return fmt.Errorf("failed to update receiver balance: %w", err)
+        }
+    } else {
+        // 如果读取失败，设置初始余额
+        if err := toBalance.Set("amount", amount); err != nil {
+            return fmt.Errorf("failed to set receiver balance: %w", err)
+        }
     }
-    toBalance.SetOwner(to)
 
     // 记录转账事件
     ctx.Log("Transfer", 
-        "from", fromBalance.Owner(),
-        "to", toBalance.Owner(),
+        "from", ctx.Sender(),
+        "to", to,
         "amount", amount)
 
     return nil
 }
 
 // GetBalance 查询账户余额
-func GetBalance(ctx vm.Context, balanceID vm.ObjectID) (uint64, error) {
+//export GetBalance
+func GetBalance(ctx vm.Context, owner vm.Address) (uint64, error) {
     // 获取余额对象
-    balanceObj, err := ctx.GetObject(balanceID)
+    balanceObj, err := ctx.GetObjectWithOwner(owner)
     if err != nil {
-        return 0, fmt.Errorf("failed to get balance object: %w", err)
+        return 0, fmt.Errorf("no balance for address: %w", err)
     }
 
     // 读取余额
     var amount uint64
-    err := balanceObj.Get("amount",&amount)
-    if err != nil {
+    if err := balanceObj.Get("amount", &amount); err != nil {
         return 0, fmt.Errorf("failed to get amount: %w", err)
     }
 
@@ -109,6 +124,7 @@ func GetBalance(ctx vm.Context, balanceID vm.ObjectID) (uint64, error) {
 }
 
 // CreateAccount 为新用户创建账户
+//export CreateAccount
 func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
     // 创建新的余额对象
     balanceObj, err := ctx.CreateObject()
@@ -134,12 +150,13 @@ func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
 这个示例展示了一个基本的代币合约，包含以下特点：
 
 1. **包级别函数**：所有函数都是包级别的，无需定义结构体
-2. **无状态设计**：所有状态都存储在外部对象中
-3. **所有权控制**：通过对象所有权实现访问控制
-4. **事件记录**：使用 `ctx.Log` 记录重要操作
-5. **错误处理**：提供清晰的错误信息
-6. **类型安全**：使用强类型确保数据安全
-7. **公开接口**：所有公共函数首字母大写，自动导出为 WebAssembly 函数
+2. **使用 `//export` 标记**：使用 `//export` 标记导出函数，使其可被外部调用
+3. **无状态设计**：所有状态都存储在外部对象中
+4. **所有权控制**：通过对象所有权实现访问控制
+5. **事件记录**：使用 `ctx.Log` 记录重要操作
+6. **错误处理**：提供清晰的错误信息
+7. **类型安全**：使用强类型确保数据安全
+8. **公开接口**：所有公共函数首字母大写，自动导出为 WebAssembly 函数
 
 使用示例：
 
@@ -156,7 +173,7 @@ ownerBalanceID := initResult.(vm.ObjectID)
 _ = engine.ExecuteWithArgs(contractAddr, "Transfer", aliceAddr, uint64(1000))
 
 // 查询 Alice 的余额
-balance, _ := engine.ExecuteWithArgs(contractAddr, "GetBalance", aliceBalanceID)
+balance, _ := engine.ExecuteWithArgs(contractAddr, "GetBalance", aliceAddr)
 fmt.Printf("Alice's balance: %d\n", balance.(uint64))
 ```
 
