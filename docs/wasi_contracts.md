@@ -24,19 +24,18 @@ import (
 )
 
 // Initialize 初始化代币合约，创建初始供应量
-func Initialize(ctx vm.Context, totalSupply uint64) (vm.ObjectID, error) {
-    // 创建代币发行者的余额对象
-    balanceObj, err := ctx.CreateObject()
-    if err != nil {
-        return vm.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
-    }
+func Initialize(ctx vm.Context, name string, totalSupply uint64) (vm.ObjectID, error) {
+    // 创建信息对象 - 基础状态操作，失败时会panic
+    infoObj := ctx.CreateObject()
+    infoObj.Set("name",name)
 
-    // 设置发行者的初始余额
-    if err := balanceObj.Set("amount", totalSupply); err != nil {
-        return vm.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
-    }
+    // 创建代币发行者的余额对象 - 基础状态操作，失败时会panic
+    balanceObj := ctx.CreateObject()
 
-    // 设置对象所有者为合约部署者
+    balanceObj.Set("type", infoObj.ID())
+    balanceObj.Set("amount", totalSupply)
+
+    // 设置对象所有者为合约部署者 - 基础状态操作，失败时会panic
     balanceObj.SetOwner(ctx.Sender())
 
     // 记录初始化事件
@@ -51,17 +50,6 @@ func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
     fromBalance, err := ctx.GetObjectWithOwner(ctx.Sender())
     if err != nil {
         return fmt.Errorf("failed to get sender balance: %w", err)
-    }
-
-    // 获取接收方余额对象（如果不存在则创建）
-    toBalance, err := ctx.GetObjectWithOwner(to)
-    if err != nil {
-        // 不存在则创建新对象
-        toBalance, err = ctx.CreateObject()
-        if err != nil {
-            return fmt.Errorf("failed to create receiver balance: %w", err)
-        }
-        toBalance.SetOwner(to)
     }
 
     // 读取当前余额
@@ -80,19 +68,15 @@ func Transfer(ctx vm.Context, to vm.Address, amount uint64) error {
         return fmt.Errorf("failed to update sender balance: %w", err)
     }
 
-    // 读取并更新接收方余额
-    var toAmount uint64
-    if err := toBalance.Get("amount", &toAmount); err == nil {
-        // 如果读取成功，更新现有余额
-        if err := toBalance.Set("amount", toAmount+amount); err != nil {
-            return fmt.Errorf("failed to update receiver balance: %w", err)
-        }
-    } else {
-        // 如果读取失败，设置初始余额
-        if err := toBalance.Set("amount", amount); err != nil {
-            return fmt.Errorf("failed to set receiver balance: %w", err)
-        }
-    }
+    // 创建接收方余额对象 - 基础状态操作，失败时会panic
+    toBalance := ctx.CreateObject()
+    
+    var tokenType vm.ObjectID
+    fromBalance.Get("type",&tokenType)
+    toBalance.Set("type",tokenType)
+    toBalance.Set("amount", amount)
+    // 设置对象所有者 - 基础状态操作，失败时会panic
+    toBalance.SetOwner(to)
 
     // 记录转账事件
     ctx.Log("Transfer", 
@@ -120,27 +104,6 @@ func GetBalance(ctx vm.Context, owner vm.Address) (uint64, error) {
     return amount, nil
 }
 
-// CreateAccount 为新用户创建账户
-func CreateAccount(ctx vm.Context, owner vm.Address) (vm.ObjectID, error) {
-    // 创建新的余额对象
-    balanceObj, err := ctx.CreateObject()
-    if err != nil {
-        return vm.ObjectID{}, fmt.Errorf("failed to create balance object: %w", err)
-    }
-
-    // 设置初始余额为0
-    if err := balanceObj.Set("amount", uint64(0)); err != nil {
-        return vm.ObjectID{}, fmt.Errorf("failed to set initial balance: %w", err)
-    }
-
-    // 设置对象所有者
-    balanceObj.SetOwner(owner)
-
-    // 记录账户创建事件
-    ctx.Log("CreateAccount", "owner", owner)
-
-    return balanceObj.ID(), nil
-}
 ```
 
 这个示例展示了一个基本的代币合约，包含以下特点：
@@ -402,7 +365,7 @@ func (e *Engine) prepareCompilationEnvironment(code []byte, wrapperCode []byte) 
     
     // 写入原始合约代码
     // 写入包装代码
-    // 创建 go.mod 指定依赖关系
+    // 创建 go.mod 文件指定依赖关系
     
     return tempDir, nil
 }

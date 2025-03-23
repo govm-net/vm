@@ -347,10 +347,6 @@ VM 实现了多层安全机制：
 - **通信机制**：
   - GoVM 通过数据库进行合约间通信
   - 本 VM 使用 WASI 导入函数和内存映射传递参数和结果
-  
-- **错误处理**：
-  - GoVM 使用 Panic 机制处理合约错误
-  - 本 VM 使用错误返回值和 WebAssembly 错误码处理错误
 
 ## 合约开发指南
 
@@ -365,14 +361,11 @@ import (
 
 // 初始化函数 - 部署时调用
 func Initialize(ctx core.Context, initialValue string) (core.ObjectID, error) {
-    // 创建一个数据对象
-    dataObj, err := ctx.CreateObject()
-    if err != nil {
-        return core.ObjectID{}, err
-    }
+    // 创建一个数据对象 - 基础状态操作，失败时会panic
+    dataObj := ctx.CreateObject()
     
     // 设置初始值
-    err = dataObj.Set("value", initialValue)
+    err := dataObj.Set("value", initialValue)
     if err != nil {
         return core.ObjectID{}, err
     }
@@ -404,11 +397,6 @@ func SetValue(ctx core.Context, dataObjectID core.ObjectID, newValue string) (bo
     dataObj, err := ctx.GetObject(dataObjectID)
     if err != nil {
         return false, err
-    }
-    
-    // 验证所有权
-    if dataObj.Owner() != ctx.Sender() {
-        return false, core.ErrUnauthorized
     }
     
     // 更新值

@@ -307,26 +307,25 @@ func (c *Context) GetObjectWithOwner(owner Address) (vm.Object, error) {
 	return &obj, nil
 }
 
-func (c *Context) CreateObject() (vm.Object, error) {
+func (c *Context) CreateObject() vm.Object {
 	// 调用宿主函数，使用常量FuncCreateObject
 	ptr, size, _ := callHost(FuncCreateObject, nil)
 	if ptr == 0 || size == 0 {
-		return &Object{}, fmt.Errorf("failed to create object")
+		panic("failed to create object")
 	}
 
 	data := readMemory(ptr, size)
 	var obj Object
 	copy(obj.id[:], data)
-	return &obj, nil
+	return &obj
 }
 
-func (c *Context) DeleteObject(objectID ObjectID) error {
+func (c *Context) DeleteObject(objectID ObjectID) {
 	// 调用宿主函数，使用常量FuncDeleteObject
 	_, _, result := callHost(FuncDeleteObject, objectID[:])
 	if result == 0 {
-		return fmt.Errorf("failed to delete object")
+		panic("failed to delete object")
 	}
-	return nil
 }
 
 func (c *Context) Log(event string, data ...any) {
@@ -370,7 +369,7 @@ func (o *Object) Owner() Address {
 	return addr
 }
 
-func (o *Object) SetOwner(owner Address) error {
+func (o *Object) SetOwner(owner Address) {
 	// 创建参数：对象ID + 所有者地址
 	data := make([]byte, 32+20)
 	copy(data[:32], o.id[:])
@@ -379,9 +378,8 @@ func (o *Object) SetOwner(owner Address) error {
 	// 调用宿主函数，使用常量FuncSetObjectOwner
 	_, _, result := callHost(FuncSetObjectOwner, data)
 	if result == 0 {
-		return fmt.Errorf("failed to set owner")
+		panic("failed to set owner")
 	}
-	return nil
 }
 
 func (o *Object) Get(field string, value any) error {
@@ -438,10 +436,7 @@ func hello() int32 {
 	fmt.Println("hello")
 	ctx := &Context{}
 	ctx.Log("hello", "world")
-	object, err := ctx.CreateObject()
-	if err != nil {
-		fmt.Println("failed to create object")
-	}
+	object := ctx.CreateObject()
 	fmt.Println(object)
 	return 1
 }

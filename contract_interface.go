@@ -32,18 +32,17 @@ type Context interface {
 	// Call invokes a function on another contract
 	Call(contract Address, function string, args ...any) ([]byte, error)
 
+	// CreateObject creates a new object
+	CreateObject() Object
+
 	// GetObject retrieves a state object by its ID, if id is empty, it will be the default object
 	GetObject(objectID ObjectID) (Object, error)
 
 	// GetObjectWithOwner retrieves a state object by its type and owner
 	GetObjectWithOwner(owner Address) (Object, error)
 
-	// CreateObject creates a new object, using database backing if available
-	// or in-memory storage if no database is configured
-	CreateObject() (Object, error)
-
 	// DeleteObject deletes an object from state
-	DeleteObject(objectID ObjectID) error
+	DeleteObject(objectID ObjectID)
 
 	// Log emits an event to the blockchain
 	Log(event string, data ...any)
@@ -58,7 +57,7 @@ type Object interface {
 	Owner() Address
 
 	// SetOwner changes the owner of the object
-	SetOwner(owner Address) error
+	SetOwner(owner Address)
 
 	// Get retrieves a value from the object's fields
 	Get(field string, value any) error

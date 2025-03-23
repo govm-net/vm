@@ -54,23 +54,17 @@ type Counter struct{}
 
 // Initialize 创建一个新的计数器对象
 func (c *Counter) Initialize(ctx core.Context) (core.ObjectID, error) {
-	// 创建一个新的状态对象
-	obj, err := ctx.CreateObject()
-	if err != nil {
-		return core.ObjectID{}, err
-	}
+	// 创建一个新的状态对象 - 基础状态操作，失败时会panic
+	obj := ctx.CreateObject()
 
 	// 设置初始计数为 0
-	err = obj.Set("count", uint64(0))
+	err := obj.Set("count", uint64(0))
 	if err != nil {
 		return core.ObjectID{}, err
 	}
 
-	// 设置对象所有者为合约创建者
-	err = obj.SetOwner(ctx.Sender())
-	if err != nil {
-		return core.ObjectID{}, err
-	}
+	// 设置对象所有者为合约创建者 - 基础状态操作，失败时会panic
+	obj.SetOwner(ctx.Sender())
 
 	// 记录创建事件
 	ctx.Log("CounterCreated", obj.ID())

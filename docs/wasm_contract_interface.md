@@ -169,11 +169,11 @@ type Context interface {
     Balance(addr Address) uint64 // 获取账户余额
     Transfer(to Address, amount uint64) error // 转账操作
     
-    // 对象存储相关
-    CreateObject() (Object, error)          // 创建新对象
-    GetObject(id ObjectID) (Object, error)  // 获取指定对象
-    GetObjectWithOwner(owner Address) (Object, error) // 获取指定所有者的对象
-    DeleteObject(id ObjectID) error         // 删除对象
+    // 对象存储相关 - 基础状态操作使用panic而非返回error
+    CreateObject() Object                     // 创建新对象，失败时panic
+    GetObject(id ObjectID) (Object, error)    // 获取指定对象，可能返回error
+    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+    DeleteObject(id ObjectID)                 // 删除对象，失败时panic
     
     // 跨合约调用
     Call(contract Address, function string, args ...any) ([]byte, error)
@@ -278,6 +278,39 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
     return readMemory(ptr, size), nil
 }
 
+func (c *Context) CreateObject() Object {
+    // 创建新对象 - 基础状态操作，失败时会panic
+    
+    // 调用主机函数创建对象
+    ptr, size, errCode := callHost(FuncCreateObject, nil)
+    if errCode != 0 {
+        panic(fmt.Sprintf("failed to create object with code: %d", errCode))
+    }
+    
+    // 解析对象ID
+    idData := readMemory(ptr, size)
+    var id ObjectID
+    copy(id[:], idData)
+    
+    // 返回对象包装器
+    return &Object{id: id}
+}
+
+func (c *Context) DeleteObject(id ObjectID) {
+    // 删除对象 - 基础状态操作，失败时会panic
+    data, err := writeToMemory(id)
+    if err != nil {
+        panic(fmt.Sprintf("failed to serialize object ID: %v", err))
+    }
+    
+    _, _, errCode := callHost(FuncDeleteObject, data)
+    if errCode != 0 {
+        panic(fmt.Sprintf("failed to delete object with code: %d", errCode))
+    }
+    
+    // 操作成功，无需返回值
+}
+
 // ...其他 Context 方法
 ```
 
@@ -290,7 +323,7 @@ Object 接口提供状态对象的操作方法：
 type Object interface {
     ID() ObjectID           // 获取对象ID
     Owner() Address         // 获取对象所有者
-    SetOwner(addr Address) error // 设置对象所有者
+    SetOwner(addr Address)  // 设置对象所有者，失败时panic
     
     // 字段操作
     Get(field string, value any) error  // 获取字段值
@@ -317,8 +350,8 @@ func (o *Object) Owner() Address {
     return owner
 }
 
-func (o *Object) SetOwner(owner Address) error {
-    // 设置对象所有者
+func (o *Object) SetOwner(owner Address) {
+    // 设置对象所有者 - 基础状态操作，失败时会panic
     ownerData := struct {
         ID    ObjectID
         Owner Address
@@ -329,15 +362,15 @@ func (o *Object) SetOwner(owner Address) error {
     
     data, err := writeToMemory(ownerData)
     if err != nil {
-        return err
+        panic(fmt.Sprintf("failed to serialize data: %v", err))
     }
     
     _, _, errCode := callHost(FuncSetObjectOwner, data)
     if errCode != 0 {
-        return fmt.Errorf("set owner failed with code: %d", errCode)
+        panic(fmt.Sprintf("set owner failed with code: %d", errCode))
     }
     
-    return nil
+    // 操作成功，无需返回值
 }
 
 func (o *Object) Get(field string, value any) error {

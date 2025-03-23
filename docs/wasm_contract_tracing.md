@@ -51,9 +51,8 @@ wrapperCode := generateWASIWrapper(packageName, functions, code)
 系统会自动识别以下情况并进行插桩：
 
 1. **直接跨合约调用**：通过 Context.Call 方法调用其他合约
-2. **间接跨合约调用**：通过调用辅助函数间接执行跨合约调用 
-3. **导入合约直接调用**：通过 import 其他合约并使用 `package.function()` 方式直接调用的情况
-4. **特殊操作调用**：合约执行导致状态变更的关键操作
+2. **导入合约直接调用**：通过 import 其他合约并使用 `package.function()` 方式直接调用的情况
+3. **特殊操作调用**：合约执行导致状态变更的关键操作
 
 每个插桩点都会自动添加必要的代码以维护调用链信息，而无需开发者手动实现。
 
@@ -106,28 +105,26 @@ func transferTokens(to Address, amount uint64) error {
 
 ### 2.4 自动添加的 Mock 钩子函数
 
-系统提供了一个专门的 mock 模块，包含"进入"和"退出"两个核心接口，用于实现更精确的调用追踪。在包装合约代码的过程中，系统会自动在所有对外暴露的函数中添加对这两个接口的调用：
+系统提供了一个专门的 mock 模块，包含"进入"和"退出"两个核心接口，用于实现更精确的调用追踪。为了最小化资源消耗，这些钩子函数仅记录必要的信息：
 
 ```go
 // mock 模块提供的钩子接口
 package mock
 
 // 函数调用进入时的钩子
-func Enter(contractAddress Address, functionName string, params map[string]interface{}) {
+func Enter(contractAddress Address, functionName string) {
     // 记录函数调用开始
-    // 记录传入的参数
     // 维护调用栈信息
     // 记录调用时间戳
+    // 只记录必要信息，不保存完整参数以节省资源
 }
 
 // 函数调用退出时的钩子
-func Exit(contractAddress Address, functionName string, result map[string]interface{}, err interface{}) {
+func Exit(contractAddress Address, functionName string) {
     // 记录函数调用结束
-    // 记录返回结果
-    // 记录可能的错误
     // 清理调用栈
     // 计算执行时间
-    // 记录返回状态
+    // 仅记录状态码，不保存详细结果以减少开销
 }
 ```
 
@@ -154,46 +151,40 @@ func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
     // 设置当前调用上下文
     setCurrentCallInfo(params.CallInfo)
     
-    // 记录参数信息
-    traceParams := map[string]interface{}{
-        "to": params.To.String(),
-        "amount": params.Amount,
-    }
-    
-    // 自动添加的进入钩子
-    mock.Enter(getCurrentContractAddress(), "Transfer", traceParams)
+    // 调用进入钩子 - 只传递合约地址和函数名，不传递详细参数
+    mock.Enter(getCurrentContractAddress(), "Transfer")
     
     // 延迟执行退出钩子，确保无论函数如何返回都会被调用
     defer func() {
         if r := recover(); r != nil {
-            mock.Exit(getCurrentContractAddress(), "Transfer", nil, r)
+            // 只记录基本信息，不记录详细错误内容
+            mock.Exit(getCurrentContractAddress(), "Transfer")
             panic(r) // 重新抛出panic
         }
     }()
     
-    // 调用原始函数
+    // 调用实际函数
     status := Transfer(params.To, params.Amount)
     
-    // 记录结果信息
-    result := map[string]interface{}{
-        "status": status,
-    }
-    mock.Exit(getCurrentContractAddress(), "Transfer", result, nil)
+    // 记录基本退出信息，不包含详细结果
+    mock.Exit(getCurrentContractAddress(), "Transfer")
     
     return status
 }
 ```
 
-mock 模块会记录所有这些事件，并将它们保存到一个跟踪日志中，可以用于分析合约执行过程：
+mock 模块会记录这些轻量级事件，构建调用树但不保存详细的参数和结果值，大幅减少存储和处理成本：
 
 ```
-[ENTER] Contract: 0x1234... Function: Transfer Params: {"to":"0x5678...","amount":1000} Time: 1630000000000
-  [ENTER] Contract: 0x1234... Function: checkBalance Params: {...} Time: 1630000000010
+[ENTER] Contract: 0x1234... Function: Transfer Time: 1630000000000
+  [ENTER] Contract: 0x1234... Function: checkBalance Time: 1630000000010
   [EXIT]  Contract: 0x1234... Function: checkBalance Time: 1630000000020 Duration: 10ms
-  [ENTER] Contract: 0x1234... Function: updateBalance Params: {...} Time: 1630000000030
+  [ENTER] Contract: 0x1234... Function: updateBalance Time: 1630000000030
   [EXIT]  Contract: 0x1234... Function: updateBalance Time: 1630000000040 Duration: 10ms
 [EXIT]  Contract: 0x1234... Function: Transfer Time: 1630000000050 Duration: 50ms
 ```
+
+通过这种轻量级设计，系统能够提供调用链追踪能力，同时最小化对合约执行性能的影响。
 
 ### 2.5 钩子函数工作原理
 
@@ -306,6 +297,57 @@ func (c *Context) Sender() Address {
     var addr Address
     copy(addr[:], data)
     return addr
+}
+```
+
+### 3.4 完整的Context接口定义
+
+以下是完整的Context接口定义，注意基础状态操作不返回错误：
+
+```go
+// Context接口 - 智能合约的执行上下文
+type Context interface {
+    // 区块链状态
+    BlockHeight() uint64          // 获取当前区块高度
+    BlockTime() int64             // 获取当前区块时间戳
+    ContractAddress() Address     // 获取当前合约地址
+    
+    // 账户相关
+    Sender() Address              // 获取交易发送者
+    Balance(addr Address) uint64  // 获取账户余额
+    Transfer(to Address, amount uint64) error // 转账操作
+    
+    // 对象存储 - 基础状态操作使用panic而非返回error
+    CreateObject() Object                     // 创建新对象，失败时panic
+    GetObject(id ObjectID) (Object, error)    // 获取对象，可能返回error
+    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+    DeleteObject(id ObjectID)                 // 删除对象，失败时panic
+    
+    // 合约交互
+    Call(contract Address, function string, args ...any) ([]byte, error)
+    
+    // 日志与事件
+    Log(event string, keyValues ...interface{}) // 记录事件
+    
+    // 调用链信息
+    CallerContract() Address      // 获取调用者合约地址
+    CallerFunction() string       // 获取调用者函数名
+    GetCallChain() []CallFrame    // 获取完整调用链
+}
+```
+
+与之相应的Object接口定义：
+
+```go
+// Object接口 - 状态对象
+type Object interface {
+    ID() ObjectID              // 获取对象ID
+    Owner() Address            // 获取所有者
+    SetOwner(owner Address)    // 设置所有者，失败时panic
+    
+    // 数据操作
+    Get(field string, value interface{}) error // 获取字段值，可能返回error
+    Set(field string, value interface{}) error // 设置字段值，可能返回error
 }
 ```
 
@@ -486,6 +528,30 @@ func unmarshalToRegisteredType(typeStr string, data []byte) (interface{}, error)
 
 这种机制支持递归处理嵌套结构体，确保所有复杂参数都能保持正确的类型。
 
+### 4.4.1 基础状态操作的错误处理
+
+系统中的基础状态操作（如`CreateObject`、`DeleteObject`和`SetOwner`等）采用 panic 机制而非返回 error：
+
+```go
+// 创建对象 - 失败时会panic
+obj := ctx.CreateObject()
+
+// 删除对象 - 失败时会panic
+ctx.DeleteObject(objectID)
+
+// 设置所有者 - 失败时会panic
+obj.SetOwner(newOwner)
+```
+
+这种设计有几个重要优势：
+
+1. **合约代码简化**：开发者不需要处理每个基础操作后的错误检查
+2. **明确的失败边界**：区分业务逻辑错误和系统级错误
+3. **确定性保证**：如果基础操作失败，表明有严重问题，应立即停止执行
+4. **自动资源清理**：通过panic机制，确保任何延迟操作都被正确执行
+
+与此相对，像`Get`和`Set`这样的非基础操作仍然返回error，因为它们可能因为业务逻辑原因失败（如类型不匹配），这些是合约需要处理的正常业务场景。
+
 ### 4.5 性能优化策略
 
 为提高参数处理的性能，系统采用多种优化策略：
@@ -567,29 +633,25 @@ func detectReentrancy(callChain []CallFrame, currentContract Address) bool {
 
 ### 5.4 不同调用模式的对比
 
-WebAssembly智能合约系统支持多种不同的跨合约调用模式，每种模式都会自动维护调用链信息：
+WebAssembly智能合约系统支持两种主要的跨合约调用模式，每种模式都会自动维护调用链信息：
 
 ```mermaid
 flowchart LR
     A[合约A] -->|Context.Call| B[合约B]
-    A -->|辅助函数封装| C[合约C]
     A -->|import直接调用| D[合约D]
     
     subgraph "调用追踪"
         B1[B合约中<br>caller=A]
-        C1[C合约中<br>caller=A]
         D1[D合约中<br>caller=A]
     end
     
     B --> B1
-    C --> C1
     D --> D1
 ```
 
 | 调用方式 | 语法示例 | 优势 | 场景 |
 |---------|--------|------|------|
 | Context.Call | `ctx.Call(addr, "func", args...)` | 动态确定目标 | 运行时决定目标合约 |
-| 辅助函数封装 | `helper.CallToken(addr, amount)` | 简化调用逻辑 | 需要预处理的复杂调用 |
 | Import直接调用 | `token.Transfer(to, amount)` | 自然的代码风格 | 与固定合约紧密集成 |
 
 无论采用何种方式，系统都会自动维护完整的调用者信息和调用链。
@@ -726,15 +788,11 @@ func Transfer(to Address, amount uint64) int32 {
     recipientBalanceObj, err := ctx.GetObject(getBalanceObjectID(to))
     if err != nil {
         // 如果接收者没有余额对象，创建一个
-        recipientBalanceObj, err = ctx.CreateObject()
-        if err != nil {
-            return ErrorCreateBalanceFailed
-        }
+        // CreateObject是基础状态操作，失败时会panic而不是返回error
+        recipientBalanceObj = ctx.CreateObject()
         
-        // 设置所有者
-        if err := recipientBalanceObj.SetOwner(to); err != nil {
-            return ErrorSetOwnerFailed
-        }
+        // SetOwner也是基础状态操作，失败时会panic
+        recipientBalanceObj.SetOwner(to)
     }
     
     var recipientBalance uint64
@@ -914,7 +972,7 @@ func Swap(inputToken Address, outputToken Address, amount uint64, recipient Addr
 
 ### 6.4 自动添加的钩子函数示例
 
-系统遵循明确的命名规范，所有自动生成的包装函数都采用`handle+FunctionName`的命名格式。以下是原始合约代码，开发者只需专注于业务逻辑实现：
+系统遵循明确的命名规范，所有自动生成的包装函数都采用`handle+FunctionName`的命名格式。为优化性能，钩子函数仅记录必要的调用元数据，不记录详细参数。以下是原始合约代码，开发者只需专注于业务逻辑实现：
 
 ```go
 // 原始合约代码
@@ -934,7 +992,7 @@ func Transfer(to Address, amount uint64) int32 {
 }
 ```
 
-系统会自动为其生成包装代码，添加必要的钩子函数和参数处理逻辑：
+系统会自动为其生成轻量级的包装代码，添加必要的钩子函数但避免过多资源消耗：
 
 ```go
 // 生成的包装代码（系统自动添加，开发者无需编写）
@@ -951,20 +1009,14 @@ func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
     // 设置当前调用上下文
     setCurrentCallInfo(params.CallInfo)
     
-    // 记录参数，用于追踪
-    traceParams := map[string]interface{}{
-        "to": params.To.String(),
-        "amount": params.Amount,
-    }
-    
-    // 调用进入钩子
-    mock.Enter(vm.GetCurrentContract(), "Transfer", traceParams)
+    // 调用进入钩子 - 只传递必要信息，不传递详细参数
+    mock.Enter(vm.GetCurrentContract(), "Transfer")
     
     // 无论如何都会执行退出钩子
     defer func() {
         // 捕获可能的panic
         if r := recover(); r != nil {
-            mock.Exit(vm.GetCurrentContract(), "Transfer", nil, r)
+            mock.Exit(vm.GetCurrentContract(), "Transfer")
             panic(r) // 重新抛出panic
         }
     }()
@@ -972,25 +1024,22 @@ func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
     // 调用实际函数
     status := Transfer(params.To, params.Amount)
     
-    // 记录结果
-    result := map[string]interface{}{
-        "status": status,
-    }
-    mock.Exit(vm.GetCurrentContract(), "Transfer", result, nil)
+    // 记录退出信息，不记录详细结果
+    mock.Exit(vm.GetCurrentContract(), "Transfer")
     
     return status
 }
 ```
 
-为保持一致性，系统对所有导出函数都采用这种命名规范。这使得开发者可以清晰地区分原始合约函数和系统生成的包装函数，并建立明确的心智模型。
+为保持一致性，系统对所有导出函数都采用这种轻量级的调用追踪方法。这种设计实现了调用链追踪的核心功能，同时将性能影响降到最低。
 
-mock 模块会记录所有这些事件，并将它们保存到一个跟踪日志中，可以用于分析合约执行过程：
+mock 模块的轻量级记录格式示例：
 
 ```
-[ENTER] Contract: 0x1234... Function: Transfer Params: {"to":"0x5678...","amount":1000} Time: 1630000000000
-  [ENTER] Contract: 0x1234... Function: checkBalance Params: {...} Time: 1630000000010
+[ENTER] Contract: 0x1234... Function: Transfer Time: 1630000000000
+  [ENTER] Contract: 0x1234... Function: checkBalance Time: 1630000000010
   [EXIT]  Contract: 0x1234... Function: checkBalance Time: 1630000000020 Duration: 10ms
-  [ENTER] Contract: 0x1234... Function: updateBalance Params: {...} Time: 1630000000030
+  [ENTER] Contract: 0x1234... Function: updateBalance Time: 1630000000030
   [EXIT]  Contract: 0x1234... Function: updateBalance Time: 1630000000040 Duration: 10ms
 [EXIT]  Contract: 0x1234... Function: Transfer Time: 1630000000050 Duration: 50ms
 ```
@@ -1103,9 +1152,9 @@ flowchart TD
 
 ### 10.2 自动跟踪与性能分析
 
-系统提供的自动钩子机制为合约执行提供了全方位的监控：
+系统提供的自动钩子机制为合约执行提供了轻量级但有效的监控：
 
-1. **函数级性能监控**：精确测量每个函数的执行时间
+1. **函数级性能监控**：精确测量每个函数的执行时间，同时最小化开销
    ```go
    // 分析合约性能
    func analyzeFunctionPerformance(contractAddr Address, records []CallRecord) {
@@ -1123,8 +1172,8 @@ flowchart TD
    }
    ```
 
-2. **热点函数识别**：识别执行时间长或调用频繁的函数
-3. **资源使用优化**：根据调用树分析优化资源分配
-4. **异常检测**：自动检测异常执行路径或超时函数
+2. **热点函数识别**：识别执行时间长的函数，无需记录详细参数即可发现性能瓶颈
+3. **资源使用优化**：通过记录调用时间而非完整参数，实现高效的资源分析
+4. **异常检测**：检测执行路径异常或超时，无需存储完整的调用上下文
 
-通过结合基于编译期插桩的跨合约调用追踪和运行时自动添加的钩子函数，VM 项目的 WebAssembly 智能合约系统实现了完整、精确的合约执行跟踪能力，为开发者提供了强大的调试和监控工具，同时保持了对开发者的透明性。 
+通过优化的轻量级调用追踪设计，VM 项目的 WebAssembly 智能合约系统实现了关键的调用链追踪能力，同时最小化了对合约执行性能和资源消耗的影响，使系统在保持透明性的同时更加高效。 

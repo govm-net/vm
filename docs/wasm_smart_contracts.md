@@ -86,10 +86,11 @@ type Context interface {
     Balance(addr Address) uint64 // 获取账户余额
     Transfer(to Address, amount uint64) error // 转账操作
     
-    // 对象存储相关
-    CreateObject() (Object, error)          // 创建新对象
-    GetObject(id ObjectID) (Object, error)  // 获取指定对象
-    DeleteObject(id ObjectID) error         // 删除对象
+    // 对象存储相关 - 基础状态操作使用panic而非返回error
+    CreateObject() Object                    // 创建新对象，失败时panic
+    GetObject(id ObjectID) (Object, error)   // 获取指定对象，可能返回error
+    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+    DeleteObject(id ObjectID)                // 删除对象，失败时panic
     
     // 跨合约调用
     Call(contract Address, function string, args ...any) ([]byte, error)
@@ -102,7 +103,7 @@ type Context interface {
 type Object interface {
     ID() ObjectID           // 获取对象ID
     Owner() Address         // 获取对象所有者
-    SetOwner(addr Address) error // 设置对象所有者
+    SetOwner(addr Address)  // 设置对象所有者，失败时panic
     
     // 字段操作
     Get(field string, value any) error  // 获取字段值
