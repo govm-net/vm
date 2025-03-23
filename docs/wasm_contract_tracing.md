@@ -113,47 +113,86 @@ func transferTokens(to Address, amount uint64) error {
 package mock
 
 // 函数调用进入时的钩子
-func Enter(contractAddress Address, functionName string) {
+func Enter(contractAddress Address, functionName string, params map[string]interface{}) {
     // 记录函数调用开始
+    // 记录传入的参数
     // 维护调用栈信息
     // 记录调用时间戳
 }
 
 // 函数调用退出时的钩子
-func Exit(contractAddress Address, functionName string) {
+func Exit(contractAddress Address, functionName string, result map[string]interface{}, err interface{}) {
     // 记录函数调用结束
+    // 记录返回结果
+    // 记录可能的错误
     // 清理调用栈
     // 计算执行时间
     // 记录返回状态
 }
 ```
 
-生成的包装代码会自动将这些钩子添加到每个导出函数中：
+生成的包装代码会自动将这些钩子添加到每个导出函数中。系统采用统一的命名规范，所有自动生成的处理函数都以`handle`开头，后跟函数名：
 
 ```go
-// 原始合约函数
-//export transfer
-func transfer(toPtr int32, amount int64) int32 {
+// 原始合约函数 - 大写字母开头的函数会被自动导出
+func Transfer(to Address, amount uint64) int32 {
     // 业务逻辑
     return SuccessCode
 }
 
-// 生成的包装函数
-//export transfer
-func transfer(toPtr int32, amount int64) int32 {
+// 生成的包装函数（系统自动添加）
+func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
+    // 解析参数
+    paramsBytes := readMemory(paramsPtr, paramsLen)
+    var params struct {
+        CallInfo *CallInfo `json:"call_info"`
+        To       Address   `json:"to"`
+        Amount   uint64    `json:"amount"`
+    }
+    json.Unmarshal(paramsBytes, &params)
+    
+    // 设置当前调用上下文
+    setCurrentCallInfo(params.CallInfo)
+    
+    // 记录参数信息
+    traceParams := map[string]interface{}{
+        "to": params.To.String(),
+        "amount": params.Amount,
+    }
+    
     // 自动添加的进入钩子
-    mock.Enter(getCurrentContractAddress(), "transfer")
+    mock.Enter(getCurrentContractAddress(), "Transfer", traceParams)
     
     // 延迟执行退出钩子，确保无论函数如何返回都会被调用
     defer func() {
-        mock.Exit(getCurrentContractAddress(), "transfer")
+        if r := recover(); r != nil {
+            mock.Exit(getCurrentContractAddress(), "Transfer", nil, r)
+            panic(r) // 重新抛出panic
+        }
     }()
     
     // 调用原始函数
-    status := original_transfer(toPtr, amount)
+    status := Transfer(params.To, params.Amount)
+    
+    // 记录结果信息
+    result := map[string]interface{}{
+        "status": status,
+    }
+    mock.Exit(getCurrentContractAddress(), "Transfer", result, nil)
     
     return status
 }
+```
+
+mock 模块会记录所有这些事件，并将它们保存到一个跟踪日志中，可以用于分析合约执行过程：
+
+```
+[ENTER] Contract: 0x1234... Function: Transfer Params: {"to":"0x5678...","amount":1000} Time: 1630000000000
+  [ENTER] Contract: 0x1234... Function: checkBalance Params: {...} Time: 1630000000010
+  [EXIT]  Contract: 0x1234... Function: checkBalance Time: 1630000000020 Duration: 10ms
+  [ENTER] Contract: 0x1234... Function: updateBalance Params: {...} Time: 1630000000030
+  [EXIT]  Contract: 0x1234... Function: updateBalance Time: 1630000000040 Duration: 10ms
+[EXIT]  Contract: 0x1234... Function: Transfer Time: 1630000000050 Duration: 50ms
 ```
 
 ### 2.5 钩子函数工作原理
@@ -274,29 +313,43 @@ func (c *Context) Sender() Address {
 
 合约之间的互相调用需要安全、可靠地传递调用者信息，系统采用统一的信息传递机制。
 
-### 4.1 自动生成的参数结构体
+### 4.1 参数结构体的自动生成
 
-在合约编译阶段，系统会自动识别所有导出函数的接口和参数列表，为每个函数生成对应的参数结构体：
+对于每个合约中的导出函数，系统会在编译阶段自动生成对应的参数结构体和处理函数：
 
 ```go
-// 原始合约函数 - 大写字母开头的函数自动导出
+// 原始合约函数 - 大写字母开头的函数会被自动导出
 func Transfer(to Address, amount uint64) error {
-    // 函数实现...
+    // 业务逻辑实现...
 }
 
 // 自动生成的参数结构体
 type TransferParams struct {
-    CallInfo *CallInfo `json:"call_info"` // 自动注入的调用链信息
-    To       Address   `json:"to"`        // 第一个参数
-    Amount   uint64    `json:"amount"`    // 第二个参数
+    CallInfo *CallInfo `json:"call_info"` // 调用链信息
+    To       Address   `json:"to"`        // 目标地址
+    Amount   uint64    `json:"amount"`    // 转账金额
+}
+
+// 自动生成的处理函数
+func handleTransfer(paramsJSON []byte) int32 {
+    // 反序列化参数
+    var params TransferParams
+    json.Unmarshal(paramsJSON, &params)
+    
+    // 设置调用上下文
+    // ...
+    
+    // 调用实际函数
+    // ...
 }
 ```
 
-这种结构体设计的优势：
-- 统一的参数封装模式
-- 自动包含调用链信息
-- 字段名称与原始参数名称一致
-- 通过JSON标签支持序列化/反序列化
+系统在合约编译阶段分析源代码，自动识别所有大写字母开头的函数作为导出函数，无需开发者手动添加`//export`注释。这些函数将遵循以下处理流程：
+
+1. **函数接口分析**：系统识别函数名称、参数类型和返回值类型
+2. **参数结构体生成**：为每个函数创建专用的参数结构体
+3. **序列化代码生成**：生成参数打包和结果返回的包装代码
+4. **调用链信息注入**：自动在参数结构体中添加调用链字段
 
 ### 4.2 参数序列化过程
 
@@ -350,8 +403,9 @@ func handleExternalCall(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) in
     // 读取参数JSON
     paramsJSON := readMemory(paramsPtr, paramsLen)
     
-    // 查找函数处理器
-    handler, found := functionHandlers[funcName]
+    // 查找函数处理器，这里使用handle+FunctionName格式的处理函数
+    handlerName := "handle" + funcName
+    handler, found := functionHandlers[handlerName]
     if !found {
         errorResult := &ErrorResult{Error: "function not found: " + funcName}
         resultJSON, _ := json.Marshal(errorResult)
@@ -393,6 +447,8 @@ func handleTransfer(paramsJSON []byte) int32 {
     return SuccessCode
 }
 ```
+
+在这个过程中，所有的自动生成函数处理器都采用`handle+FunctionName`的命名格式，确保整个系统有一致的命名风格，便于开发者理解和使用。
 
 ### 4.4 复杂结构参数处理
 
@@ -592,20 +648,12 @@ func buildCallTree(records []CallRecord) *CallTreeNode {
 
 ```go
 // 在交易所合约中
-//export swap_tokens
-func swap_tokens(ctx vm.Context,fromTokenPtr int32, toTokenPtr int32, amountPtr int32) int32 {
-    // 解析参数
-    fromTokenData := readMemory(fromTokenPtr, 20) // 地址长度为20
-    toTokenData := readMemory(toTokenPtr, 20)
-    amountData := readMemory(amountPtr, 8) // uint64长度为8
-    
-    var fromToken, toToken Address
-    copy(fromToken[:], fromTokenData)
-    copy(toToken[:], toTokenData)
-    amount := binary.LittleEndian.Uint64(amountData)
+// 大写字母开头的函数会被自动导出
+func SwapTokens(fromToken Address, toToken Address, amount uint64) int32 {
+    ctx := vm.GetContext()
     
     // 调用第一个代币合约 - 系统会自动注入调用者信息
-    result, err := ctx.Call(fromToken, "transfer_from", ctx.Sender(), ctx.ContractAddress(), amount)
+    result, err := ctx.Call(fromToken, "TransferFrom", ctx.Sender(), ctx.ContractAddress(), amount)
     if err != nil {
         ctx.Log("swap_failed", "step", "transfer_from", "error", err.Error())
         return ErrorFirstTransferFailed
@@ -616,7 +664,7 @@ func swap_tokens(ctx vm.Context,fromTokenPtr int32, toTokenPtr int32, amountPtr 
     exchangeAmount := amount * exchangeRate / 1e8 // 使用1e8作为精度因子
     
     // 调用第二个代币合约 - 同样会自动注入调用者信息
-    result, err = ctx.Call(toToken, "transfer", ctx.Sender(), exchangeAmount)
+    result, err = ctx.Call(toToken, "Transfer", ctx.Sender(), exchangeAmount)
     if err != nil {
         ctx.Log("swap_failed", "step", "transfer", "error", err.Error())
         return ErrorSecondTransferFailed
@@ -634,37 +682,27 @@ func swap_tokens(ctx vm.Context,fromTokenPtr int32, toTokenPtr int32, amountPtr 
 }
 
 // 在代币合约中
-//export transfer
-func transfer(dataPtr int32, dataLen int32) int32 {
-    ctx := &Context{}
+// 大写字母开头的函数会被自动导出
+func Transfer(to Address, amount uint64) int32 {
+    ctx := vm.GetContext()
     
-    // 读取和解析输入数据
-    data := readMemory(dataPtr, dataLen)
-    var input struct {
-        CallInfo *CallInfo `json:"call_info"`
-        From     Address   `json:"from"`
-        To       Address   `json:"to"`
-        Amount   uint64    `json:"amount"`
-    }
+    // 系统底层自动反序列化参数并提取调用信息
+    // 开发者不需要显式处理这些细节
     
-    if err := json.Unmarshal(data, &input); err != nil {
-        return ErrorInvalidInput
-    }
-    
-    // 获取调用者信息
-    callerContract := input.CallInfo.CallerContract
-    callerFunction := input.CallInfo.CallerFunction
+    // 获取调用者信息(系统自动提供)
+    callerContract := ctx.CallerContract()
+    callerFunction := ctx.CallerFunction()
     
     // 检查调用者是否有权限
-    if !isApprovedSpender(input.From, callerContract) {
+    if !isApprovedSpender(ctx.Sender(), callerContract) {
         ctx.Log("unauthorized_transfer", 
                 "caller", callerContract.String(),
-                "from", input.From.String())
+                "from", ctx.Sender().String())
         return ErrorUnauthorized
     }
     
     // 检查余额
-    balanceObj, err := ctx.GetObject(getBalanceObjectID(input.From))
+    balanceObj, err := ctx.GetObject(getBalanceObjectID(ctx.Sender()))
     if err != nil {
         return ErrorBalanceNotFound
     }
@@ -674,18 +712,18 @@ func transfer(dataPtr int32, dataLen int32) int32 {
         return ErrorReadBalanceFailed
     }
     
-    if balance < input.Amount {
+    if balance < amount {
         return ErrorInsufficientBalance
     }
     
     // 执行转账
-    balance -= input.Amount
+    balance -= amount
     if err := balanceObj.Set("amount", balance); err != nil {
         return ErrorUpdateBalanceFailed
     }
     
     // 更新接收者余额
-    recipientBalanceObj, err := ctx.GetObject(getBalanceObjectID(input.To))
+    recipientBalanceObj, err := ctx.GetObject(getBalanceObjectID(to))
     if err != nil {
         // 如果接收者没有余额对象，创建一个
         recipientBalanceObj, err = ctx.CreateObject()
@@ -694,7 +732,7 @@ func transfer(dataPtr int32, dataLen int32) int32 {
         }
         
         // 设置所有者
-        if err := recipientBalanceObj.SetOwner(input.To); err != nil {
+        if err := recipientBalanceObj.SetOwner(to); err != nil {
             return ErrorSetOwnerFailed
         }
     }
@@ -702,7 +740,7 @@ func transfer(dataPtr int32, dataLen int32) int32 {
     var recipientBalance uint64
     recipientBalanceObj.Get("amount", &recipientBalance) // 忽略错误，可能是新创建的对象
     
-    recipientBalance += input.Amount
+    recipientBalance += amount
     if err := recipientBalanceObj.Set("amount", recipientBalance); err != nil {
         return ErrorUpdateRecipientFailed
     }
@@ -711,9 +749,9 @@ func transfer(dataPtr int32, dataLen int32) int32 {
     ctx.Log("transfer",
             "caller_contract", callerContract.String(),
             "caller_function", callerFunction,
-            "from", input.From.String(),
-            "to", input.To.String(),
-            "amount", input.Amount)
+            "from", ctx.Sender().String(),
+            "to", to.String(),
+            "amount", amount)
     
     return SuccessCode
 }
@@ -725,39 +763,34 @@ func transfer(dataPtr int32, dataLen int32) int32 {
 
 ```go
 // 在用户界面合约中 (DApp合约)
-//export execute_complex_transaction
-func execute_complex_transaction(dataPtr int32, dataLen int32) int32 {
-    ctx := &Context{}
+// 大写字母开头的函数会被自动导出
+func ExecuteComplexTransaction(userData TransactionData) int32 {
+    ctx := vm.GetContext()
     
     // 调用业务逻辑合约
-    result, err := ctx.Call(businessLogicContract, "process_transaction", ...)
+    result, err := ctx.Call(businessLogicContract, "ProcessTransaction", userData)
     if err != nil {
         return ErrorBusinessLogicFailed
     }
     
     // ... 更多代码
+    return SuccessCode
 }
 
 // 在业务逻辑合约中
-//export process_transaction
-func process_transaction(dataPtr int32, dataLen int32) int32 {
-    ctx := &Context{}
+// 大写字母开头的函数会被自动导出
+func ProcessTransaction(data TransactionData) int32 {
+    ctx := vm.GetContext()
     
-    // 解析数据，包含自动注入的调用信息
-    data := readMemory(dataPtr, dataLen)
-    var input struct {
-        CallInfo *CallInfo `json:"call_info"`
-        // 其他参数...
-    }
-    json.Unmarshal(data, &input)
+    // 系统自动反序列化参数并提取调用信息
     
     // 验证是否由授权的UI合约调用
-    if !isAuthorizedUIContract(input.CallInfo.CallerContract) {
+    if !isAuthorizedUIContract(ctx.CallerContract()) {
         return ErrorUnauthorizedCaller
     }
     
     // 调用代币合约
-    result, err := ctx.Call(tokenContract, "transfer", ...)
+    result, err := ctx.Call(tokenContract, "Transfer", data.Recipient, data.Amount)
     if err != nil {
         return ErrorTokenTransferFailed
     }
@@ -766,50 +799,26 @@ func process_transaction(dataPtr int32, dataLen int32) int32 {
     return SuccessCode
 }
 
-// 在代币合约中
-//export transfer
-func transfer(dataPtr int32, dataLen int32) int32 {
-    ctx := &Context{}
+// 在流动性池合约中
+package liquidity
+
+// 大写字母开头的函数会被自动导出
+func Swap(inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
+    ctx := vm.GetContext()
     
-    // 解析数据
-    data := readMemory(dataPtr, dataLen)
-    var input struct {
-        CallInfo *CallInfo `json:"call_info"`
-        // 其他参数...
-    }
-    json.Unmarshal(data, &input)
+    // 系统自动提取调用信息
     
-    // 查看完整调用链
-    callChain := input.CallInfo.CallChain
+    // 获取实际调用者 - 这里会是dapp合约地址
+    callerContract := ctx.CallerContract()
     
-    // 打印调用链信息用于调试
-    callPathStr := "CallPath: "
-    for i, frame := range callChain {
-        if i > 0 {
-            callPathStr += " -> "
-        }
-        callPathStr += fmt.Sprintf("%s.%s", frame.Contract.String()[:8], frame.Function)
+    // 检查调用者权限
+    if !isAuthorizedCaller(callerContract) {
+        ctx.Log("unauthorized_swap",
+                "caller", callerContract.String())
+        return ErrorUnauthorizedCaller
     }
     
-    // 记录调用链
-    ctx.Log("call_chain", "path", callPathStr)
-    
-    // 判断是否通过业务逻辑合约调用
-    isViaBusinessLogic := false
-    for _, frame := range callChain {
-        if frame.Contract == businessLogicContract {
-            isViaBusinessLogic = true
-            break
-        }
-    }
-    
-    if !isViaBusinessLogic {
-        ctx.Log("unauthorized_path", "reason", "not_via_business_logic")
-        return ErrorUnauthorizedCallPath
-    }
-    
-    // 执行转账逻辑...
-    // ...
+    // 安全地执行交换...
     
     return SuccessCode
 }
@@ -832,19 +841,9 @@ import (
 
 // 导入合约在执行环境中已关联到对应的链上合约地址
 
-//export execute_swap
-func execute_swap(inputTokenPtr int32, outputTokenPtr int32, amountPtr int32) int32 {
-    ctx := &Context{}
-    
-    // 解析参数
-    inputTokenBytes := readMemory(inputTokenPtr, 20)
-    outputTokenBytes := readMemory(outputTokenPtr, 20)
-    amountBytes := readMemory(amountPtr, 8)
-    
-    var inputToken, outputToken Address
-    copy(inputToken[:], inputTokenBytes)
-    copy(outputToken[:], outputTokenBytes)
-    amount := binary.LittleEndian.Uint64(amountBytes)
+// 大写字母开头的函数会被自动导出
+func ExecuteSwap(inputToken Address, outputToken Address, amount uint64) int32 {
+    ctx := vm.GetContext()
     
     // 检查发送者余额 - 通过导入的合约包直接调用
     // 系统会自动插桩这个调用，注入当前合约信息
@@ -891,26 +890,14 @@ func execute_swap(inputTokenPtr int32, outputTokenPtr int32, amountPtr int32) in
 // 在流动性池合约中
 package liquidity
 
-//export swap
-func swap(dataPtr int32, dataLen int32) int32 {
-    ctx := &Context{}
+// 大写字母开头的函数会被自动导出
+func Swap(inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
+    ctx := vm.GetContext()
     
-    // 解析数据，包含自动注入的调用信息
-    data := readMemory(dataPtr, dataLen)
-    var input struct {
-        CallInfo     *CallInfo `json:"call_info"`
-        InputToken   Address   `json:"input_token"`
-        OutputToken  Address   `json:"output_token"`
-        Amount       uint64    `json:"amount"`
-        Recipient    Address   `json:"recipient"`
-    }
-    
-    if err := json.Unmarshal(data, &input); err != nil {
-        return ErrorInvalidInput
-    }
+    // 系统自动提取调用信息
     
     // 获取实际调用者 - 这里会是dapp合约地址
-    callerContract := input.CallInfo.CallerContract
+    callerContract := ctx.CallerContract()
     
     // 检查调用者权限
     if !isAuthorizedCaller(callerContract) {
@@ -927,24 +914,17 @@ func swap(dataPtr int32, dataLen int32) int32 {
 
 ### 6.4 自动添加的钩子函数示例
 
-以下是一个展示自动添加的 mock 钩子函数如何工作的完整示例：
+系统遵循明确的命名规范，所有自动生成的包装函数都采用`handle+FunctionName`的命名格式。以下是原始合约代码，开发者只需专注于业务逻辑实现：
 
 ```go
 // 原始合约代码
 package token
 
-//export transfer
-func transfer(toPtr int32, toLen int32, amountPtr int32) int32 {
-    // 解析参数
-    toAddrData := readMemory(toPtr, toLen)
-    amountData := readMemory(amountPtr, 8)
+// 大写字母开头的函数会被自动导出
+func Transfer(to Address, amount uint64) int32 {
+    ctx := vm.GetContext()
     
-    var toAddr Address
-    copy(toAddr[:], toAddrData)
-    amount := binary.LittleEndian.Uint64(amountData)
-    
-    // 执行转账逻辑
-    ctx := &Context{}
+    // 获取发送者
     from := ctx.Sender()
     
     // 检查余额...
@@ -952,51 +932,67 @@ func transfer(toPtr int32, toLen int32, amountPtr int32) int32 {
     
     return SuccessCode
 }
+```
 
-// 生成的包装代码（系统自动添加）
-//export transfer
-func transfer(toPtr int32, toLen int32, amountPtr int32) int32 {
+系统会自动为其生成包装代码，添加必要的钩子函数和参数处理逻辑：
+
+```go
+// 生成的包装代码（系统自动添加，开发者无需编写）
+func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
+    // 读取和解析参数
+    paramsBytes := readMemory(paramsPtr, paramsLen)
+    var params struct {
+        CallInfo *CallInfo `json:"call_info"`
+        To       Address   `json:"to"`
+        Amount   uint64    `json:"amount"`
+    }
+    json.Unmarshal(paramsBytes, &params)
+    
+    // 设置当前调用上下文
+    setCurrentCallInfo(params.CallInfo)
+    
     // 记录参数，用于追踪
-    params := map[string]interface{}{
-        "toPtr": toPtr,
-        "toLen": toLen,
-        "amountPtr": amountPtr,
+    traceParams := map[string]interface{}{
+        "to": params.To.String(),
+        "amount": params.Amount,
     }
     
     // 调用进入钩子
-    mock.Enter(vm.GetCurrentContract(), "transfer", params)
+    mock.Enter(vm.GetCurrentContract(), "Transfer", traceParams)
     
     // 无论如何都会执行退出钩子
     defer func() {
         // 捕获可能的panic
         if r := recover(); r != nil {
-            mock.Exit(vm.GetCurrentContract(), "transfer")
+            mock.Exit(vm.GetCurrentContract(), "Transfer", nil, r)
             panic(r) // 重新抛出panic
-        } else {
-            // 正常退出
-            result := map[string]interface{}{
-                "status": status,
-            }
-            mock.Exit(vm.GetCurrentContract(), "transfer")
         }
     }()
     
-    // 调用原始函数
-    status := original_transfer(toPtr, toLen, amountPtr)
+    // 调用实际函数
+    status := Transfer(params.To, params.Amount)
+    
+    // 记录结果
+    result := map[string]interface{}{
+        "status": status,
+    }
+    mock.Exit(vm.GetCurrentContract(), "Transfer", result, nil)
     
     return status
 }
 ```
 
+为保持一致性，系统对所有导出函数都采用这种命名规范。这使得开发者可以清晰地区分原始合约函数和系统生成的包装函数，并建立明确的心智模型。
+
 mock 模块会记录所有这些事件，并将它们保存到一个跟踪日志中，可以用于分析合约执行过程：
 
 ```
-[ENTER] Contract: 0x1234... Function: transfer Params: {"toPtr":1024,"toLen":20,"amountPtr":1064} Time: 1630000000000
+[ENTER] Contract: 0x1234... Function: Transfer Params: {"to":"0x5678...","amount":1000} Time: 1630000000000
   [ENTER] Contract: 0x1234... Function: checkBalance Params: {...} Time: 1630000000010
   [EXIT]  Contract: 0x1234... Function: checkBalance Time: 1630000000020 Duration: 10ms
   [ENTER] Contract: 0x1234... Function: updateBalance Params: {...} Time: 1630000000030
   [EXIT]  Contract: 0x1234... Function: updateBalance Time: 1630000000040 Duration: 10ms
-[EXIT]  Contract: 0x1234... Function: transfer Time: 1630000000050 Duration: 50ms
+[EXIT]  Contract: 0x1234... Function: Transfer Time: 1630000000050 Duration: 50ms
 ```
 
 ## 7. 与其他 WASM 智能合约平台对比
@@ -1056,7 +1052,9 @@ flowchart TD
 
 调用链追踪机制是 WebAssembly 智能合约系统的关键安全基础设施，它通过自动插桩和上下文增强，在不增加开发者负担的情况下，提供了精确的调用者识别和完整的调用链追踪能力。本文档详细阐述了该机制的工作原理、实现方式和实际应用场景。
 
-通过与其他核心组件的紧密集成，调用链追踪机制构成了统一文档体系的重要部分，确保了整个 WebAssembly 智能合约生态的安全性、可追溯性和开发友好性。开发者可以利用这一机制构建更安全、更可靠的智能合约应用。 
+系统通过统一的命名规范（所有自动生成的包装函数都采用`handle+FunctionName`格式）提供了直观且一致的开发体验，使开发者能够清晰地区分原始合约函数和系统生成的包装代码。
+
+通过与其他核心组件的紧密集成，调用链追踪机制构成了统一文档体系的重要部分，确保了整个 WebAssembly 智能合约生态的安全性、可追溯性和开发友好性。开发者可以利用这一机制构建更安全、更可靠的智能合约应用。
 
 ## 10. 最佳实践
 
@@ -1066,7 +1064,7 @@ flowchart TD
 
 1. **权限检查**：总是在敏感操作前验证调用者权限
    ```go
-   if !isAuthorized(callInfo.CallerContract, callInfo.CallerFunction) {
+   if !isAuthorized(ctx.CallerContract(), ctx.CallerFunction()) {
        return ErrorUnauthorized
    }
    ```
@@ -1074,7 +1072,7 @@ flowchart TD
 2. **调用链验证**：对关键操作验证完整调用链
    ```go
    // 检查调用链是否符合预期模式
-   if !validateCallChain(callInfo.CallChain, expectedPattern) {
+   if !validateCallChain(ctx.GetCallChain(), expectedPattern) {
        return ErrorInvalidCallChain
    }
    ```
@@ -1082,21 +1080,21 @@ flowchart TD
 3. **记录关键调用**：记录重要的跨合约调用以便审计
    ```go
    ctx.Log("important_operation", 
-           "caller", callInfo.CallerContract.String(),
-           "caller_function", callInfo.CallerFunction,
-           "call_chain_depth", len(callInfo.CallChain))
+           "caller", ctx.CallerContract().String(),
+           "caller_function", ctx.CallerFunction(),
+           "call_chain_depth", len(ctx.GetCallChain()))
    ```
 
 4. **防重入保护**：检查调用链防止重入攻击
    ```go
-   if detectReentrancy(callInfo.CallChain, ctx.ContractAddress()) {
+   if detectReentrancy(ctx.GetCallChain(), ctx.ContractAddress()) {
        return ErrorReentrancyDetected
    }
    ```
 
 5. **调用路径控制**：限制敏感操作只能通过特定路径调用
    ```go
-   if !mustCallViaPath(callInfo.CallChain, requiredPath) {
+   if !mustCallViaPath(ctx.GetCallChain(), requiredPath) {
        return ErrorInvalidCallPath
    }
    ```
