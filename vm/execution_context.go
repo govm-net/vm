@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/types"
 	"github.com/wasmerio/wasmer-go/wasmer"
 )
 
@@ -55,7 +56,7 @@ type VMStateManager interface {
 // 内存缓冲区大小常量
 const (
 	// 宿主缓冲区大小 - 用于在宿主和合约间传递数据
-	// HostBufferSize uint32 = uint32(types.HostBufferSize)
+	HostBufferSize uint32 = uint32(types.HostBufferSize)
 
 	// 最大调用深度
 	MaxCallDepth = 8
