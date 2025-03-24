@@ -102,8 +102,6 @@ govm-net/vm/
 │   └── interface.go            # 合约所需的核心接口定义(Context, Object)
 │
 ├── types/                      # 基础类型定义（内部使用）
-│   ├── address.go              # 地址类型实现
-│   ├── objectid.go             # 对象ID类型实现
 │   ├── common.go               # 通用类型定义
 │   └── errors.go               # 错误类型定义
 │

@@ -11,14 +11,16 @@ flowchart LR
     A[编写Go合约] --> B[验证源码]
     B --> C[编译为WebAssembly]
     C --> D[部署到区块链]
-    D --> E[初始化合约]
-    E --> F[执行合约函数]
+    D --> E1[创建默认Object]
+    E1 --> E2[初始化合约]
+    E2 --> F[执行合约函数]
     
     style A fill:#d0f0c0
     style B fill:#d0f0c0
     style C fill:#d0f0c0
     style D fill:#c0d0f0
-    style E fill:#f0d0c0
+    style E1 fill:#f0c0c0
+    style E2 fill:#f0d0c0
     style F fill:#f0d0c0
 ```
 
@@ -217,6 +219,93 @@ func (e *Engine) storeContractMetadata(addr vm.Address, metadata ContractMetadat
 }
 ```
 
+### 3.4 默认Object的创建
+
+系统会在合约部署时自动为合约创建一个默认的存储对象，该对象有真实的唯一ID，但可以通过空ObjectID访问：
+
+```go
+// 为合约创建默认存储对象
+func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
+    // 创建一个具有真实唯一ID的对象
+    objID := vm.GenerateObjectID()
+    
+    defaultObject := &vm.Object{
+        ID:    objID,           // 真实的唯一ID
+        Owner: contractAddr,    // 所有者为合约地址
+    }
+    
+    // 将默认对象添加到状态管理器
+    err := e.state.StoreObject(defaultObject)
+    if err != nil {
+        return fmt.Errorf("failed to create default object: %w", err)
+    }
+    
+    // 记录合约与默认对象的关联，使其可以通过空ID访问
+    e.state.RegisterDefaultObject(contractAddr, objID)
+    
+    // 记录创建事件
+    e.eventEmitter.Emit("default_object_created", 
+        "contract", contractAddr.String(),
+        "object_id", objID.String())
+    
+    return nil
+}
+```
+
+这个默认Object具有以下特性：
+- 具有真实的唯一ID，但系统会注册特殊映射，使其可通过空ObjectID访问
+- 初始所有者设置为合约地址本身
+- 可以像其他对象一样转移所有权
+- 部署后立即可用，无需合约显式创建
+- 与合约生命周期绑定，在合约存在期间始终可访问
+
+合约代码通过空ObjectID访问默认Object：
+
+```go
+// 在合约代码中
+defaultObj, err := ctx.GetObject(ObjectID{}) // 传入空ObjectID
+```
+
+### 3.5 默认Object的内部实现
+
+在内部实现中，系统维护了一个从合约地址到默认Object ID的映射：
+
+```go
+// 内部映射表
+var contractDefaultObjects map[Address]ObjectID
+
+// 注册合约的默认对象
+func (s *State) RegisterDefaultObject(contractAddr Address, objID ObjectID) {
+    s.contractDefaultObjects[contractAddr] = objID
+}
+
+// 处理GetObject请求时的特殊逻辑
+func (s *State) GetObject(id ObjectID) (Object, error) {
+    // 检查是否为空ID请求
+    if id.IsZero() {
+        // 获取当前执行上下文中的合约地址
+        contractAddr := s.currentContext.ContractAddress
+        
+        // 查找该合约的默认对象真实ID
+        realID, exists := s.contractDefaultObjects[contractAddr]
+        if !exists {
+            return nil, errors.New("default object not found for contract")
+        }
+        
+        // 使用真实ID查找对象
+        return s.objects[realID], nil
+    }
+    
+    // 非空ID的正常查找逻辑
+    obj, exists := s.objects[id]
+    if !exists {
+        return nil, errors.New("object not found")
+    }
+    
+    return obj, nil
+}
+```
+
 ## 4. 合约执行流程
 
 ### 4.1 加载 WebAssembly 模块
@@ -345,264 +434,679 @@ func (e *Engine) setupExecutionState(addr vm.Address, sender vm.Address) {
 
 ### 4.5 调用合约函数
 
-最后，调用指定的合约函数：
+执行环境准备好后，系统通过统一的入口点调用合约函数：
 
 ```go
 // 调用合约函数
 func (e *Engine) callContractFunction(instance *wasmer.Instance, functionName string, args ...interface{}) (interface{}, error) {
-    // 获取导出函数
-    function, err := instance.Exports.GetFunction(functionName)
+    // 获取统一入口函数
+    handleContractCall, err := instance.Exports.GetFunction("handle_contract_call")
     if err != nil {
-        return nil, fmt.Errorf("function not found: %s", functionName)
+        return nil, fmt.Errorf("合约入口函数未找到: %w", err)
     }
     
-    // 准备参数
-    wasmArgs, err := e.prepareArguments(instance, args...)
+    // 准备函数名
+    functionNameBytes := []byte(functionName)
+    functionNamePtr, err := allocateWasmMemory(instance, int32(len(functionNameBytes)))
     if err != nil {
-        return nil, fmt.Errorf("failed to prepare arguments: %w", err)
+        return nil, fmt.Errorf("内存分配失败: %w", err)
+    }
+    copyToWasmMemory(instance, functionNamePtr, functionNameBytes)
+    
+    // 序列化参数为JSON
+    paramsJSON, err := json.Marshal(args)
+    if err != nil {
+        return nil, fmt.Errorf("参数序列化失败: %w", err)
     }
     
-    // 执行函数
-    result, err := function(wasmArgs...)
+    // 分配参数内存
+    paramsPtr, err := allocateWasmMemory(instance, int32(len(paramsJSON)))
     if err != nil {
-        return nil, fmt.Errorf("execution failed: %w", err)
+        return nil, fmt.Errorf("参数内存分配失败: %w", err)
+    }
+    copyToWasmMemory(instance, paramsPtr, paramsJSON)
+    
+    // 调用统一入口函数
+    result, err := handleContractCall(
+        functionNamePtr, int32(len(functionNameBytes)),
+        paramsPtr, int32(len(paramsJSON)),
+    )
+    if err != nil {
+        return nil, fmt.Errorf("合约执行失败: %w", err)
     }
     
     // 处理结果
     return e.processResult(instance, result)
 }
+
+// 分配WebAssembly内存辅助函数
+func allocateWasmMemory(instance *wasmer.Instance, size int32) (int32, error) {
+    allocate, err := instance.Exports.GetFunction("allocate")
+    if err != nil {
+        return 0, err
+    }
+    
+    ptrRaw, err := allocate(size)
+    if err != nil {
+        return 0, err
+    }
+    
+    return ptrRaw.(int32), nil
+}
+
+// 复制数据到WebAssembly内存
+func copyToWasmMemory(instance *wasmer.Instance, ptr int32, data []byte) error {
+    memory := instance.Exports.GetMemory("memory")
+    if memory == nil {
+        return errors.New("memory not exported")
+    }
+    
+    // 检查内存边界
+    if ptr < 0 || int(ptr)+len(data) > len(memory.Data()) {
+        return errors.New("内存范围超出限制")
+    }
+    
+    // 复制数据
+    copy(memory.Data()[ptr:ptr+int32(len(data))], data)
+    return nil
+}
 ```
+
+#### 4.5.1 跨合约调用上下文管理
+
+当进行跨合约调用时，系统采用简化的上下文管理方式，主要依靠合约内的 mock 模块进行调用链管理：
+
+```go
+// 处理跨合约调用，FuncCall
+func (e *Engine) handleCrossContractCall(sender Address, targetContract Address, function string, args ...interface{}) (interface{}, error) {
+    // 创建新的Engine实例处理合约调用
+    // 这种方式避免了复杂的上下文保存/恢复
+    callEngine := NewEngine(e.blockchain, e.stateManager)
+    
+    // 设置基本执行参数
+    callEngine.setupExecutionState(targetContract, sender)
+    
+    // 加载目标合约
+    instance, err := callEngine.loadContractInstance(targetContract)
+    if err != nil {
+        return nil, fmt.Errorf("加载目标合约失败: %w", err)
+    }
+    
+    // 直接执行目标合约的函数
+    // 调用链信息由合约内的mock模块维护
+    return callEngine.callContractFunction(instance, function, args...)
+}
+```
+
+跨合约调用上下文管理的关键点：
+
+1. **简化的主机设计**：
+   - 主机环境不负责维护复杂的调用链状态
+   - 每次跨合约调用创建新的执行引擎实例，职责边界清晰
+   - 避免了状态保存和恢复的复杂性
+
+2. **合约内调用链管理**：
+   - 调用链信息由合约内的 mock 模块自动维护
+   - 合约代码通过 Context 接口发起 Call 请求
+   - Mock 模块在编译期注入的代码自动记录调用信息
+
+3. **调用者信息传递**：
+   - 被调用合约可通过 ctx.Sender() 获取调用者身份
+   - 系统确保正确传递调用者信息，支持精确的权限控制
+
+4. **统一追踪机制**：
+   - 所有调用过程通过 mock 模块统一追踪
+   - 记录完整的函数调用出入口信息
+   - 支持性能分析、调试和审计
+
+这种设计将职责分离，主机环境只负责基本的合约调用机制，而复杂的调用链管理完全由合约内的 mock 模块处理，大大简化了系统设计，提高了可维护性和可靠性。
+
+### 4.6 初始化与默认Object的访问
+
+系统保证合约始终可以通过空ObjectID访问其默认Object，这对于合约状态管理至关重要：
+
+```go
+// 从具有空ID的默认对象中读取数据
+func (ctx *vmContext) GetDefaultObjectField(field string) ([]byte, error) {
+    // 使用空ObjectID查找默认对象
+    obj, err := ctx.GetObject(vm.ObjectID{})
+    if err != nil {
+        return nil, fmt.Errorf("default object not found: %w", err)
+    }
+    
+    // 从对象中读取数据
+    return obj.GetField(field)
+}
+
+// 写入数据到默认对象
+func (ctx *vmContext) SetDefaultObjectField(field string, value []byte) error {
+    // 使用空ObjectID查找默认对象
+    obj, err := ctx.GetObject(vm.ObjectID{})
+    if err != nil {
+        return fmt.Errorf("default object not found: %w", err)
+    }
+    
+    // 检查权限 - 确保合约有权修改对象
+    if obj.Owner != ctx.contractAddress && !obj.HasWritePermission(ctx.contractAddress) {
+        return errors.New("no permission to modify object")
+    }
+    
+    // 写入数据到对象
+    return obj.SetField(field, value)
+}
+```
+
+#### 4.6.1 默认Object所有权和权限管理
+
+当合约转移默认Object的所有权时，需要谨慎处理权限问题：
+
+```go
+// 转移默认Object所有权示例
+func TransferDefaultObjectOwnership(to Address) bool {
+    ctx := &Context{}
+    
+    // 获取默认Object
+    defaultObj, err := ctx.GetObject(ObjectID{})
+    if err != nil {
+        return false
+    }
+    
+    // 验证调用者为当前所有者
+    if defaultObj.Owner() != ctx.Sender() {
+        ctx.Log("error", "message", "only owner can transfer ownership")
+        return false
+    }
+    
+    // 可选：保留合约自身的写入权限
+    defaultObj.GrantWritePermission(ctx.ContractAddress())
+    
+    // 转移所有权
+    defaultObj.SetOwner(to)
+    
+    return true
+}
+```
+
+如果合约转移了默认Object的所有权但没有保留写入权限，将导致合约无法再修改该Object，除非新所有者将权限授予回合约。这可用于实现高级的权限控制或升级机制。
+
+默认Object在整个合约生命周期中的使用流程：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户/调用者
+    participant VM as 虚拟机引擎
+    participant Contract as 合约代码
+    participant DefaultObj as 默认Object
+    
+    User->>VM: 部署合约
+    VM->>DefaultObj: 创建默认Object(真实ID)
+    VM->>VM: 注册合约与默认Object的映射关系
+    VM->>VM: 设置默认Object的所有者为合约地址
+    
+    User->>VM: 调用Initialize函数
+    VM->>Contract: 执行初始化代码
+    Contract->>VM: 请求通过空ID获取默认Object
+    VM->>VM: 查找映射获取真实ID
+    VM->>DefaultObj: 访问真实对象
+    Contract->>DefaultObj: 存储初始状态
+    
+    opt 转移所有权
+        User->>VM: 调用转移所有权函数
+        VM->>Contract: 执行转移逻辑
+        Contract->>DefaultObj: 更改所有者为新地址
+        Note over DefaultObj: 权限变更，可设置保留合约的写入权限
+    end
+    
+    User->>VM: 调用业务函数
+    VM->>Contract: 执行业务逻辑
+    Contract->>VM: 请求通过空ID获取默认Object
+    VM->>VM: 查找映射获取真实ID
+    VM->>DefaultObj: 访问真实对象
+    Contract->>DefaultObj: 读取全局状态
+    alt 有写入权限
+        Contract->>DefaultObj: 更新全局状态 
+    else 无写入权限
+        DefaultObj->>Contract: 返回权限错误
+        Contract->>VM: 处理错误或使用替代逻辑
+    end
+    Contract->>VM: 返回结果
+    VM->>User: 返回执行结果
+```
+
+### 4.7 统一合约入口函数
+
+每个 WebAssembly 合约都提供一个统一的入口函数，接收来自主机环境的函数调用请求，负责创建执行上下文、反序列化参数、调用具体的合约函数并返回结果：
+
+```go
+// 统一合约入口函数
+//export handle_contract_call
+func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) int32 {
+    // 读取函数名
+    funcNameBytes := readMemory(funcNamePtr, funcNameLen)
+    funcName := string(funcNameBytes)
+    
+    // 读取参数JSON
+    paramsJSON := readMemory(paramsPtr, paramsLen)
+    
+    // 创建上下文（从主机环境获取信息）
+    ctx := createContextFromHostInfo()
+    
+    // 查找函数处理器
+    handler, found := dispatchTable[funcName]
+    if !found {
+        setErrorMessage(fmt.Sprintf("未知函数: %s", funcName))
+        return ErrorCodeNotFound
+    }
+    
+    // 调用函数处理器（会自动反序列化参数并使用mock模块进行跟踪）
+    return handler(ctx, paramsJSON)
+}
+```
+
+这个统一入口函数是主机环境与合约代码之间的桥梁，提供了标准化的接口供主机调用。合约入口函数与 mock 模块紧密集成，确保每个函数调用都被正确追踪和监控：
+
+```go
+// 函数处理器示例（自动生成的代码）
+func handleTransfer(ctx *Context, paramsJSON []byte) int32 {
+    // 解析参数
+    var params struct {
+        To     Address `json:"to"`
+        Amount uint64  `json:"amount"`
+    }
+    json.Unmarshal(paramsJSON, &params)
+    
+    // 使用mock模块记录函数调用开始
+    mock.Enter(ctx.ContractAddress(), "Transfer")
+    
+    // 设置延迟退出钩子（确保任何情况下都能记录函数退出）
+    defer func() {
+        // 捕获潜在的panic
+        if r := recover(); r != nil {
+            mock.Exit(ctx.ContractAddress(), "Transfer")
+            panic(r)  // 重新抛出panic
+        }
+    }()
+    
+    // 调用实际业务函数
+    result := Transfer(ctx, params.To, params.Amount)
+    
+    // 记录函数调用结束
+    mock.Exit(ctx.ContractAddress(), "Transfer")
+    
+    return result
+}
+```
+
+统一合约入口函数设计的主要优势：
+
+1. **标准化主机交互**：提供一致的接口用于主机与合约间通信
+2. **自动化上下文管理**：统一创建和管理执行上下文，确保所有函数调用都使用相同的上下文实例
+3. **统一参数处理**：集中处理参数解析和类型转换
+4. **跨合约调用优化**：合约内函数可以直接调用，避免序列化开销
+5. **完整执行追踪**：集成mock模块进行函数调用的精确追踪，支持性能分析和调试
+
+通过这种设计，系统提供了一个清晰的合约执行模型，既简化了开发者的工作，又保证了调用链的完整性和执行的可追踪性。
+
+### 4.8 自动生成的分发代码
+
+系统在编译阶段会为每个导出函数生成相应的包装器和分发代码：
+
+```go
+// 自动生成的分发表 - 在编译阶段创建
+var dispatchTable = map[string]func(*Context, []byte) int32{
+    "Transfer": handleTransfer,
+    "BalanceOf": handleBalanceOf,
+    "Mint": handleMint,
+    // ...其他函数
+}
+
+// 优化的分发函数
+func dispatchContractFunction(functionName string, paramsJSON []byte) int32 {
+    // 创建上下文
+    ctx := createContextFromHostInfo()
+    
+    // 查找处理函数
+    handler, exists := dispatchTable[functionName]
+    if !exists {
+        setErrorMessage(fmt.Sprintf("未知函数: %s", functionName))
+        return -1
+    }
+    
+    // 调用处理函数
+    return handler(ctx, paramsJSON)
+}
+
+// 创建上下文对象的辅助函数
+func createContextFromHostInfo() *Context {
+    // 从主机环境获取信息
+    senderPtr, senderLen, _ := callHost(FuncGetSender, nil)
+    senderBytes := readMemory(senderPtr, senderLen)
+    
+    blockHeightPtr, blockHeightLen, _ := callHost(FuncGetBlockHeight, nil)
+    blockHeightBytes := readMemory(blockHeightPtr, blockHeightLen)
+    
+    // ... 获取其他上下文信息
+    
+    // 创建Context对象
+    ctx := &Context{
+        sender: bytesToAddress(senderBytes),
+        blockHeight: binary.LittleEndian.Uint64(blockHeightBytes),
+        // ... 设置其他字段
+    }
+    
+    return ctx
+}
+```
+
+通过这种设计，系统创建了一个从主机调用到合约函数的标准化流程：
+
+```mermaid
+sequenceDiagram
+    participant Host as 主机环境
+    participant Entrypoint as 合约入口函数
+    participant Dispatcher as 函数分发器
+    participant Wrapper as 函数包装器
+    participant Function as 业务函数
+    
+    Host->>Entrypoint: handle_contract_call(函数名, 参数)
+    Entrypoint->>Entrypoint: 解析函数名和参数
+    Entrypoint->>Dispatcher: dispatchContractFunction(函数名, 参数JSON)
+    Dispatcher->>Dispatcher: 创建Context
+    Dispatcher->>Wrapper: handler(ctx, 参数JSON)
+    Wrapper->>Wrapper: 解析具体参数
+    Wrapper->>Function: 业务函数(ctx, 参数1, 参数2, ...)
+    Function->>Wrapper: 返回结果
+    Wrapper->>Dispatcher: 返回状态码
+    Dispatcher->>Entrypoint: 返回状态码
+    Entrypoint->>Host: 返回最终结果
+```
+
+这种架构确保了合约函数之间的一致性，并为智能合约开发者提供了简洁的编程模型，使他们可以专注于业务逻辑而非底层通信细节。
+
+### 4.9 Mock模块与合约调用管理
+
+Mock 模块是合约内部的组件，负责自主管理合约执行上下文和调用链信息，主机环境不需要维护复杂的调用链状态。
+
+#### 4.9.1 Mock模块的职责
+
+mock 模块主要负责以下职责：
+
+1. **函数调用追踪**：记录合约函数的进入和退出
+2. **调用链管理**：维护完整的嵌套调用关系
+3. **跨合约调用识别**：识别并记录跨合约调用的来源和目标
+4. **执行时间监控**：测量函数执行时间
+5. **资源使用跟踪**：观察资源消耗模式
+
+```go
+// mock 模块核心接口
+package mock
+
+// 函数调用进入时的钩子
+func Enter(contractAddress Address, functionName string) {
+    // 记录函数调用开始
+    // 维护调用栈信息
+    // 记录调用时间戳
+}
+
+// 函数调用退出时的钩子
+func Exit(contractAddress Address, functionName string) {
+    // 记录函数调用结束
+    // 清理调用栈
+    // 计算执行时间
+}
+
+// 记录跨合约调用
+func RecordCrossContractCall(fromContract Address, fromFunction string, 
+                            toContract Address, toFunction string) {
+    // 记录跨合约调用信息
+    // 不需要在主机环境进行同步
+}
+```
+
+#### 4.9.2 自主的上下文管理
+
+与传统的设计不同，本系统中 mock 模块能够自主管理合约上下文，无需主机环境的干预：
+
+```go
+// 编译期自动生成的代码中包含上下文管理
+// 自动生成的包装函数
+func handleTransfer(ctx *Context, paramsJSON []byte) int32 {
+    // 解析参数
+    var params struct {
+        To     Address `json:"to"`
+        Amount uint64  `json:"amount"`
+    }
+    json.Unmarshal(paramsJSON, &params)
+    
+    // 调用进入钩子 - 只传递必要信息
+    mock.Enter(ctx.ContractAddress(), "Transfer")
+    
+    // 设置上下文中的调用信息
+    recordCurrentCall(ctx.ContractAddress(), "Transfer")
+    
+    // 无论如何都会执行退出钩子
+    defer func() {
+        if r := recover(); r != nil {
+            mock.Exit(ctx.ContractAddress(), "Transfer")
+            panic(r) // 重新抛出panic
+        }
+    }()
+    
+    // 调用实际函数
+    status := Transfer(ctx, params.To, params.Amount)
+    
+    // 记录退出信息
+    mock.Exit(ctx.ContractAddress(), "Transfer")
+    
+    return status
+}
+```
+
+#### 4.9.3 跨合约调用上下文传递
+
+在跨合约调用中，mock 模块通过传递上下文信息确保调用者能被正确识别：
+
+```go
+// 在合约内部处理跨合约调用
+func (ctx *Context) Call(contract Address, function string, args ...interface{}) ([]byte, error) {
+    // 记录调用信息 - 供mock模块管理调用链
+    mock.RecordCrossContractCall(ctx.ContractAddress(), getCurrentFunction(), contract, function)
+    
+    // 准备调用参数 - 只传递必要信息
+    callData := struct {
+        Sender   Address  `json:"sender"`   // 作为调用者标识
+        Function string   `json:"function"` // 函数名
+        Args     []any    `json:"args"`     // 原始参数
+    }{
+        Sender:   ctx.ContractAddress(),    // 当前合约地址作为发送者
+        Function: function,
+        Args:     args,
+    }
+    
+    // 序列化调用数据
+    serializedData, err := json.Marshal(callData)
+    if err != nil {
+        return nil, fmt.Errorf("参数序列化失败: %w", err)
+    }
+    
+    // 通过主机环境调用目标合约
+    // 主机环境会创建新的Engine实例处理请求
+    ptr, size, errCode := callHost(FuncCall, serializedData)
+    if errCode != 0 {
+        return nil, fmt.Errorf("合约调用失败，错误码: %d", errCode)
+    }
+    
+    // 返回结果
+    return readMemory(ptr, size), nil
+}
+
+// 主机环境处理跨合约调用请求
+func (e *Engine) executeContractCall(request []byte) (interface{}, error) {
+    // 解析调用请求
+    var callData struct {
+        Sender   vm.Address `json:"sender"`
+        Function string     `json:"function"`
+        Args     []any      `json:"args"`
+    }
+    
+    if err := json.Unmarshal(request, &callData); err != nil {
+        return nil, fmt.Errorf("解析调用请求失败: %w", err)
+    }
+    
+    // 创建新的引擎实例处理目标合约调用
+    targetEngine := NewEngine(e.blockchain, e.stateManager)
+    
+    // 设置执行环境，传递发送者信息
+    targetEngine.setupCallContext(callData.Sender, callData.Function)
+    
+    // 执行目标合约
+    return targetEngine.callContractDirect(callData.Function, callData.Args...)
+}
+```
+
+这种设计的核心优势：
+
+1. **简化主机实现**：
+   - 主机不需维护复杂的调用链状态
+   - 每个合约调用由独立的引擎实例处理
+   - 避免了状态保存和恢复的复杂性
+
+2. **清晰的职责边界**：
+   - 主机环境只负责创建执行环境和传递基本信息
+   - 调用链追踪由合约内的 mock 模块管理
+   - 参数序列化和反序列化由各自的合约环境处理
+
+3. **完整的调用者识别**：
+   - 被调用合约通过 Context.Sender() 获取调用者信息
+   - 调用者信息通过参数中的 Sender 字段传递
+   - 不需要复杂的调用链信息传递机制
+
+4. **高性能设计**：
+   - 减少了数据序列化和传递的开销
+   - 避免了不必要的状态管理操作
+   - 每个合约实例独立执行，利于并行化
+
+这种方法使得跨合约调用更加清晰和可维护，同时 mock 模块仍能在合约内部维护完整的调用链信息用于审计和调试。
+
+#### 4.9.4 轻量级事件记录
+
+mock 模块采用轻量级设计，只记录必要的执行信息：
+
+```
+[ENTER] Contract: 0x1234... Function: Transfer Time: 1630000000000
+  [ENTER] Contract: 0x1234... Function: checkBalance Time: 1630000000010
+  [EXIT]  Contract: 0x1234... Function: checkBalance Time: 1630000000020 Duration: 10ms
+  [CALL]  From: 0x1234... Func: Transfer To: 0x5678... Func: BalanceOf Time: 1630000000025
+  [ENTER] Contract: 0x1234... Function: updateBalance Time: 1630000000030
+  [EXIT]  Contract: 0x1234... Function: updateBalance Time: 1630000000040 Duration: 10ms
+[EXIT]  Contract: 0x1234... Function: Transfer Time: 1630000000050 Duration: 50ms
+```
+
+#### 4.9.5 与主机环境的分工
+
+在这种设计中，主机环境和 mock 模块有明确的分工：
+
+1. **主机环境职责**：
+   - 创建独立的引擎实例处理合约调用
+   - 管理合约执行资源和限制
+   - 提供基础的合约互操作接口
+   - 确保调用者信息的正确传递
+
+2. **Mock模块职责**：
+   - 自主管理调用链信息
+   - 记录函数执行开始和结束
+   - 维护嵌套调用的调用栈
+   - 支持完整的调用树构建
+
+这种职责分离使得系统架构更加清晰，减少了主机环境的复杂性，同时通过合约内的自动化机制保持了完整的调用链追踪能力。
 
 ## 5. 参数传递与结果获取
 
-### 5.1 统一参数传递机制
+### 5.1 调用链信息传递
 
-VM系统采用统一的参数传递机制，确保类型安全和调用链信息传递：
+在跨合约调用中，系统使用调用者信息传递机制，通过合约内 mock 模块维护调用链：
 
 ```go
-// 准备参数
-func (e *Engine) prepareArguments(instance *wasmer.Instance, args ...interface{}) ([]interface{}, error) {
-    memory := instance.Exports.GetMemory("memory")
-    if memory == nil {
-        return nil, errors.New("memory not exported")
+// 在合约内实现的跨合约调用
+func (ctx *Context) Call(contract Address, function string, args ...interface{}) ([]byte, error) {
+    // 记录调用信息 - 供mock模块管理调用链
+    mock.RecordCrossContractCall(ctx.ContractAddress(), getCurrentFunction(), contract, function)
+    
+    // 准备调用参数 - 只传递必要信息
+    callData := struct {
+        Sender   Address  `json:"sender"`   // 作为调用者标识
+        Function string   `json:"function"` // 函数名
+        Args     []any    `json:"args"`     // 原始参数
+    }{
+        Sender:   ctx.ContractAddress(),    // 当前合约地址作为发送者
+        Function: function,
+        Args:     args,
     }
     
-    var wasmArgs []interface{}
-    
-    for _, arg := range args {
-        switch v := arg.(type) {
-        case int, int32, int64, uint, uint32, uint64, float32, float64, bool:
-            // 基本类型直接传递
-            wasmArgs = append(wasmArgs, v)
-        default:
-            // 复杂类型需要序列化，并保留类型信息
-            typedValue := CreateTypedValue(v)
-            data, err := serializeWithType(typedValue)
-            if err != nil {
-                return nil, err
-            }
-            
-            // 分配内存
-            allocate, err := instance.Exports.GetFunction("allocate")
-            if err != nil {
-                return nil, err
-            }
-            
-            ptrRaw, err := allocate(int32(len(data)))
-            if err != nil {
-                return nil, err
-            }
-            ptr := ptrRaw.(int32)
-            
-            // 复制数据到WebAssembly内存
-            copy(memory.Data()[ptr:ptr+int32(len(data))], data)
-            
-            // 添加指针和长度参数
-            wasmArgs = append(wasmArgs, ptr, int32(len(data)))
-        }
+    // 序列化调用数据
+    serializedData, err := json.Marshal(callData)
+    if err != nil {
+        return nil, fmt.Errorf("参数序列化失败: %w", err)
     }
     
-    return wasmArgs, nil
+    // 通过主机环境调用目标合约
+    // 主机环境会创建新的Engine实例处理请求
+    ptr, size, errCode := callHost(FuncCall, serializedData)
+    if errCode != 0 {
+        return nil, fmt.Errorf("合约调用失败，错误码: %d", errCode)
+    }
+    
+    // 返回结果
+    return readMemory(ptr, size), nil
 }
 
-// 带类型信息的值
-type TypedValue struct {
-    Type  string      `json:"type"`  // 类型标识符
-    Value interface{} `json:"value"` // 实际值
-}
-
-// 创建带类型信息的值
-func CreateTypedValue(v interface{}) TypedValue {
-    var typeName string
-    
-    // 根据值的类型设置类型标识符
-    switch v.(type) {
-    case int8:
-        typeName = "int8"
-    case int16:
-        typeName = "int16" 
-    case int32:
-        typeName = "int32"
-    case int64:
-        typeName = "int64"
-    case int:
-        typeName = "int"
-    // ... 其他基本类型
-    default:
-        // 复杂结构体使用反射获取类型名
-        t := reflect.TypeOf(v)
-        if t.Kind() == reflect.Ptr {
-            t = t.Elem()
-        }
-        typeName = t.String()
+// 主机环境处理跨合约调用请求
+func (e *Engine) executeContractCall(request []byte) (interface{}, error) {
+    // 解析调用请求
+    var callData struct {
+        Sender   vm.Address `json:"sender"`
+        Function string     `json:"function"`
+        Args     []any      `json:"args"`
     }
     
-    return TypedValue{
-        Type:  typeName,
-        Value: v,
+    if err := json.Unmarshal(request, &callData); err != nil {
+        return nil, fmt.Errorf("解析调用请求失败: %w", err)
     }
-}
-
-// 序列化带类型信息的数据
-func serializeWithType(v interface{}) ([]byte, error) {
-    return json.Marshal(v)
+    
+    // 创建新的引擎实例处理目标合约调用
+    targetEngine := NewEngine(e.blockchain, e.stateManager)
+    
+    // 设置执行环境，传递发送者信息
+    targetEngine.setupCallContext(callData.Sender, callData.Function)
+    
+    // 执行目标合约
+    return targetEngine.callContractDirect(callData.Function, callData.Args...)
 }
 ```
 
-### 5.2 类型安全的结果处理
+这种设计的核心优势：
 
-执行完成后，系统以类型安全的方式处理返回结果：
+1. **简化主机实现**：
+   - 主机不需维护复杂的调用链状态
+   - 每个合约调用由独立的引擎实例处理
+   - 避免了状态保存和恢复的复杂性
 
-```go
-// 处理结果
-func (e *Engine) processResult(instance *wasmer.Instance, result interface{}) (interface{}, error) {
-    memory := instance.Exports.GetMemory("memory")
-    if memory == nil {
-        return nil, errors.New("memory not exported")
-    }
-    
-    switch v := result.(type) {
-    case int32:
-        // 检查是否为错误码
-        if v < 0 {
-            return nil, fmt.Errorf("contract returned error code: %d", v)
-        }
-        
-        // 检查是否为内存指针
-        if v > 0 {
-            // 尝试读取指针位置的长度
-            if v+4 <= int32(len(memory.Data())) {
-                length := binary.LittleEndian.Uint32(memory.Data()[v:v+4])
-                if v+4+int32(length) <= int32(len(memory.Data())) {
-                    // 读取数据
-                    data := make([]byte, length)
-                    copy(data, memory.Data()[v+4:v+4+int32(length)])
-                    
-                    // 尝试解析为带类型信息的数据
-                    var result interface{}
-                    if err := deserializeWithType(data, &result); err == nil {
-                        return result, nil
-                    }
-                    
-                    // 如果不是带类型信息的JSON，返回原始数据
-                    return data, nil
-                }
-            }
-        }
-        
-        // 简单返回值
-        return v, nil
-    // 处理其他类型的返回值...
-    default:
-        return v, nil
-    }
-}
+2. **清晰的职责边界**：
+   - 主机环境只负责创建执行环境和传递基本信息
+   - 调用链追踪由合约内的 mock 模块管理
+   - 参数序列化和反序列化由各自的合约环境处理
 
-// 反序列化带类型信息的数据
-func deserializeWithType(data []byte, target interface{}) error {
-    // 首先解析为通用结构
-    var jsonData interface{}
-    if err := json.Unmarshal(data, &jsonData); err != nil {
-        return err
-    }
-    
-    // 递归处理所有类型标记
-    processedData := processTypedValues(jsonData)
-    
-    // 使用类型反射将处理后的数据设置到目标接口
-    v := reflect.ValueOf(target).Elem()
-    v.Set(reflect.ValueOf(processedData))
-    
-    return nil
-}
+3. **完整的调用者识别**：
+   - 被调用合约通过 Context.Sender() 获取调用者信息
+   - 调用者信息通过参数中的 Sender 字段传递
+   - 不需要复杂的调用链信息传递机制
 
-// 递归处理类型标记
-func processTypedValues(data interface{}) interface{} {
-    switch v := data.(type) {
-    case map[string]interface{}:
-        // 检查是否是 TypedValue
-        if typeStr, hasType := v["type"].(string); hasType {
-            if val, hasVal := v["value"]; hasVal {
-                return convertToType(val, typeStr)
-            }
-        }
-        
-        // 处理普通对象
-        for k, val := range v {
-            v[k] = processTypedValues(val)
-        }
-    case []interface{}:
-        // 处理数组
-        for i, val := range v {
-            v[i] = processTypedValues(val)
-        }
-    }
-    
-    return data
-}
-```
+4. **高性能设计**：
+   - 减少了数据序列化和传递的开销
+   - 避免了不必要的状态管理操作
+   - 每个合约实例独立执行，利于并行化
 
-### 5.3 调用链信息传递
-
-系统自动在跨合约调用中注入和传递调用链信息：
-
-```go
-// 在合约调用中注入调用链信息
-func (e *Engine) injectCallInfo(sender, target vm.Address, function string) *CallInfo {
-    callInfo := &CallInfo{
-        CallerContract: sender,
-        CallerFunction: e.currentFunction,
-        CallChain:      append([]CallFrame{}, e.callChain...),
-    }
-    
-    // 将当前调用添加到调用链
-    e.callChain = append(e.callChain, CallFrame{
-        Contract: sender,
-        Function: e.currentFunction,
-    })
-    
-    return callInfo
-}
-
-// 执行跨合约调用
-func (e *Engine) executeContractCall(sender, target vm.Address, function string, args ...interface{}) (interface{}, error) {
-    // 注入调用链信息
-    callInfo := e.injectCallInfo(sender, target, function)
-    
-    // 添加调用信息到参数
-    enhancedArgs := append([]interface{}{callInfo}, args...)
-    
-    // 执行实际调用
-    result, err := e.callContractFunction(target, function, enhancedArgs...)
-    
-    // 恢复调用链
-    if len(e.callChain) > 0 {
-        e.callChain = e.callChain[:len(e.callChain)-1]
-    }
-    
-    return result, err
-}
-```
+这种方法使得跨合约调用更加清晰和可维护，同时 mock 模块仍能在合约内部维护完整的调用链信息用于审计和调试。
 
 ## 6. 执行流程图
 
@@ -653,20 +1157,25 @@ flowchart TD
     D --> E[执行合约]
     
     E --> F{跨合约调用?}
-    F -- 是 --> G[自动注入调用者信息]
-    G --> H[参数序列化]
-    H --> I[记录资源使用]
-    J --> E
+    F -- 是 --> G[创建新Engine实例]
+    G --> H[准备调用参数]
+    H --> I[合约内mock模块记录]
+    I --> J[新合约执行]
+    J --> K[返回结果给调用方]
+    K --> E
     
-    F -- 否 --> K[继续执行]
-    K --> L[资源计量]
-    L --> M[返回结果]
+    F -- 否 --> L[继续执行]
+    L --> M[资源计量]
+    M --> N[返回结果]
     
     subgraph 调用链追踪机制
         C
-        G
-        J
+        I
+        O[mock.Enter/Exit钩子]
     end
+    
+    E --- O
+    O --- L
     
     subgraph 参数传递机制
         B
@@ -675,13 +1184,14 @@ flowchart TD
     
     subgraph 资源控制机制
         D
-        I
-        L
+        M
     end
     
     style A fill:#f9f,stroke:#333
     style E fill:#bbf,stroke:#333
-    style M fill:#9f9,stroke:#333
+    style N fill:#9f9,stroke:#333
+    style O fill:#f9f,stroke:#333
+    style J fill:#bbf,stroke:#333
 ```
 
 ### 7.1 三大机制统一模型
@@ -690,23 +1200,24 @@ flowchart TD
 
 1. **调用链追踪**：
    - 在合约调用的入口点注入调用链信息
-   - 在跨合约调用点自动添加调用者信息
-   - 维护完整的调用栈和合约间关系
-   - 通过 mock 钩子记录函数进入和退出事件
+   - 跨合约调用创建新的引擎实例执行
+   - 通过合约内的 mock 模块自动维护调用链信息
+   - 合约函数执行前后通过 mock.Enter 和 mock.Exit 记录
+   - 支持嵌套调用场景的完整调用链构建
 
 2. **参数传递**：
-   - 使用 TypedValue 结构确保类型安全的序列化和反序列化
+   - 使用直接JSON序列化确保高效的数据传递
    - 自动生成合约接口的参数结构体
-   - 在跨合约调用中保留调用链信息
+   - 在跨合约调用中正确传递调用者信息
    - 支持复杂结构和嵌套对象的处理
 
 3. **资源控制**：
    - 设置内存使用限制和执行时间上限
    - 实现燃料系统计量指令执行
-   - 在跨合约调用中累计资源使用
+   - 每个合约实例独立计量资源使用
    - 触发资源耗尽时安全中止执行
 
-这三个机制的统一实现确保了 WebAssembly 智能合约的安全性、可追踪性和性能可控性。
+这三个机制的职责分离与协作确保了 WebAssembly 智能合约的安全性、可追踪性和性能可控性。通过将复杂的调用链管理委托给合约内的 mock 模块，系统架构更加简洁清晰，主机环境只需负责基本的合约调用和资源控制。
 
 ## 8. 资源控制
 

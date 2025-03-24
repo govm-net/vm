@@ -394,21 +394,19 @@ func (o *Object) Get(field string, value any) error {
     }
     
     fieldData := readMemory(ptr, size)
-    return deserializeWithType(fieldData, value)
+    return json.Unmarshal(fieldData, value)
 }
 
 func (o *Object) Set(field string, value any) error {
     // 设置对象字段值
-    // 使用带类型标记的序列化
-    typedValue := CreateTypedValue(value)
     setData := struct {
         ID    ObjectID
         Field string
-        Value TypedValue
+        Value any
     }{
         ID:    o.id,
         Field: field,
-        Value: typedValue,
+        Value: value,
     }
     
     data, err := writeToMemory(setData)
@@ -568,7 +566,219 @@ if argPtr < 0 || argPtr >= memorySize || argPtr+argLen > memorySize {
 - **执行时间控制**：可实现执行超时机制
 - **指令计数**：可引入指令计数机制限制执行步骤
 
-## 6. 系统调用分类
+## 6. 默认Object和状态存储
+
+每个WebAssembly智能合约在部署时会自动获得一个默认的Object，作为合约状态的主要存储位置。这种设计提供了一个标准的状态持久化机制，避免依赖全局变量。
+
+### 6.1 默认Object特性
+
+- **自动创建**：在合约部署时系统自动创建
+- **通过空ID访问**：虽然有真实的唯一ID，但可以通过空ObjectID（全为0的字节数组）访问
+- **初始所有权**：默认情况下，所有者是合约地址本身
+- **可转移所有权**：与其他对象一样，可以通过SetOwner方法转移所有权
+- **持久化存储**：数据在合约调用间保持不变
+
+### 6.2 访问默认Object
+
+合约代码可以通过以下方式访问默认Object：
+
+```go
+// 获取合约的默认Object
+func getDefaultObject(ctx *Context) Object {
+    // 使用空ObjectID获取默认对象
+    emptyID := ObjectID{} // 全为0的ObjectID
+    obj, err := ctx.GetObject(emptyID)
+    if err != nil {
+        // 正常情况下不应发生错误，因为默认Object总是存在
+        panic(fmt.Sprintf("无法获取默认对象: %v", err))
+    }
+    return obj
+}
+```
+
+### 6.3 所有权管理
+
+默认Object的所有权可以转移，这提供了灵活的权限管理机制：
+
+```go
+// 转移默认Object的所有权
+func transferDefaultObjectOwnership(ctx *Context, newOwner Address) bool {
+    // 获取默认对象
+    defaultObj, err := ctx.GetObject(ObjectID{})
+    if err != nil {
+        ctx.Log("error", "message", "无法获取默认对象")
+        return false
+    }
+    
+    // 检查当前调用者是否为所有者
+    currentOwner := defaultObj.Owner()
+    if ctx.Sender() != currentOwner {
+        ctx.Log("error", "message", "只有当前所有者可以转移所有权")
+        return false
+    }
+    
+    // 转移所有权
+    defaultObj.SetOwner(newOwner)
+    ctx.Log("ownership_transferred", "from", currentOwner, "to", newOwner)
+    return true
+}
+```
+
+需要注意的是，一旦转移了默认Object的所有权，合约本身将不再能够修改它，除非新所有者允许。这可以用于实现高级的权限控制或合约升级机制。
+
+### 6.4 使用场景
+
+默认Object的主要用途包括：
+
+1. **存储合约配置**：存储合约的不可变或很少变化的配置数据
+2. **保存全局状态**：替代全局变量存储合约的运行状态
+3. **维护索引和引用**：保存对其他对象的引用和索引
+4. **权限控制**：通过所有权转移实现管理权限的变更
+5. **合约升级**：通过转移关键对象的所有权实现合约逻辑的升级
+
+### 6.5 使用示例
+
+以下是使用默认Object存储合约全局状态的示例：
+
+```go
+// 初始化合约
+func Initialize(name string, symbol string) int32 {
+    ctx := &Context{}
+    
+    // 获取默认Object
+    defaultObj, err := ctx.GetObject(ObjectID{})
+    if err != nil {
+        ctx.Log("error", "message", "无法获取默认对象")
+        return -1
+    }
+    
+    // 存储合约基本信息
+    err = defaultObj.Set("name", name)
+    if err != nil {
+        ctx.Log("error", "message", "无法设置名称")
+        return -1
+    }
+    
+    err = defaultObj.Set("symbol", symbol)
+    if err != nil {
+        ctx.Log("error", "message", "无法设置符号")
+        return -1
+    }
+    
+    ctx.Log("initialize", "name", name, "symbol", symbol)
+    return 0
+}
+
+// 获取合约名称
+func GetName() string {
+    ctx := &Context{}
+    
+    // 获取默认Object
+    defaultObj, err := ctx.GetObject(ObjectID{})
+    if err != nil {
+        return ""
+    }
+    
+    // 读取名称
+    var name string
+    err = defaultObj.Get("name", &name)
+    if err != nil {
+        return ""
+    }
+    
+    return name
+}
+```
+
+### 6.6 与其他状态管理方式的比较
+
+| 状态管理方式 | 优点 | 缺点 |
+|------------|------|------|
+| 默认Object | 自动创建、简单直接、无需额外ID管理 | 所有数据集中在一个对象 |
+| 自定义多对象 | 数据分散存储、更好的组织结构 | 需要管理多个对象ID |
+| 全局变量 | 访问简单、无需序列化 | 状态不持久、每次执行重置 |
+
+默认Object提供了全局变量的便捷性和区块链存储的持久性，是小型合约或简单状态管理的理想选择。
+
+### 6.6 Context使用最佳实践
+
+智能合约中的Context对象是连接合约代码与区块链环境的桥梁，它提供了访问区块链状态和功能的标准接口。为了确保合约状态一致性和正确的执行环境，应当遵循以下最佳实践：
+
+#### 6.6.1 Context作为参数传递
+
+**重要原则**: Context应该作为参数传递给合约函数，而不是在函数内部创建。
+
+```go
+// ✅ 推荐：Context作为参数传递
+func Transfer(ctx *Context, to Address, amount uint64) bool {
+    // 使用传入的ctx访问区块链状态
+    sender := ctx.Sender()
+    // ...其他逻辑
+}
+
+// ❌ 禁止：在函数内部创建Context
+func Transfer(to Address, amount uint64) bool {
+    ctx := &Context{} // 不要这样做！
+    // ...其他逻辑
+}
+```
+
+#### 6.6.2 Context参数传递的好处
+
+将Context作为参数传递而非在函数内部创建有以下优势：
+
+1. **状态一致性**：确保整个交易过程中使用同一个执行上下文，保持状态一致
+2. **调用链完整性**：系统可以正确跟踪并记录合约调用链，便于审计和调试
+3. **资源控制**：允许系统对整个执行路径进行统一的资源计量和限制
+4. **依赖注入**：便于测试，可以注入模拟的Context进行单元测试
+5. **执行环境继承**：确保子调用继承父调用的执行环境特性
+
+#### 6.6.3 辅助函数中的Context传递
+
+在合约内部的辅助函数中，也应当保持Context参数的传递模式：
+
+```go
+// 公开的合约函数
+func Mint(ctx *Context, to Address, amount uint64) bool {
+    // 验证权限
+    if !isAuthorized(ctx, ctx.Sender()) {
+        return false
+    }
+    
+    // 调用辅助函数时传递Context
+    return updateBalance(ctx, to, amount)
+}
+
+// 内部辅助函数
+func updateBalance(ctx *Context, account Address, amount uint64) bool {
+    // 使用传入的Context进行状态访问
+    // ...
+}
+```
+
+#### 6.6.4 跨合约调用中的Context处理
+
+在进行跨合约调用时，系统会自动处理Context的传递和调用链信息的维护：
+
+```go
+// 在合约A中调用合约B
+func CallOtherContract(ctx *Context, targetContract Address) {
+    // 调用其他合约时，系统会自动处理Context传递
+    result, err := ctx.Call(targetContract, "SomeFunction", arg1, arg2)
+    // ...
+}
+
+// 在合约B中被调用的函数
+func SomeFunction(ctx *Context, arg1 string, arg2 uint64) {
+    // ctx中包含了调用者信息
+    caller := ctx.Sender() // 返回合约A的地址
+    // ...
+}
+```
+
+智能合约开发者应当始终遵循这种Context传递模式，以确保合约执行的正确性、一致性和可维护性。
+
+## 7. 系统调用分类
 
 WebAssembly智能合约接口系统提供以下几类系统调用：
 
@@ -582,18 +792,18 @@ WebAssembly智能合约接口系统提供以下几类系统调用：
 | 日志与事件 | 记录合约执行事件 | Log |
 | 内存管理 | 管理WebAssembly内存 | allocate, deallocate |
 
-## 7. 优化技术
+## 8. 优化技术
 
 系统采用了多种优化技术提高性能：
 
-### 7.1 内存优化
+### 8.1 内存优化
 
 - **共享缓冲区**：使用预分配的共享缓冲区减少内存分配
 - **内存复用**：减少内存分配和拷贝操作
 - **序列化优化**：高效的二进制序列化格式
 - **TinyGo内存管理**：合约使用 TinyGo 的 `-gc=leaking` 简化垃圾收集机制提高性能
 
-## 8. 最佳实践
+## 9. 最佳实践
 
 使用WebAssembly智能合约接口系统的最佳实践：
 
@@ -607,7 +817,7 @@ WebAssembly智能合约接口系统提供以下几类系统调用：
 8. **正确导出函数**：使用 `//export` 标记所有需要导出的函数
 9. **类型安全序列化**：使用带类型信息的序列化方法，避免数值类型转换问题
 
-## 9. 总结
+## 10. 总结
 
 WebAssembly智能合约接口系统为Go语言编写的智能合约提供了高效、安全的执行环境。通过精心设计的通信接口，合约代码能够安全地访问区块链状态和功能，同时主机环境保持对资源使用的严格控制。
 

@@ -1,3 +1,3 @@
-#! /bin/bash
+#!/bin/bash
 
-tinygo build -o contract.wasm -target wasi -gc=leaking ./contract.go
+tinygo build -o contract.wasm -target wasi ./
