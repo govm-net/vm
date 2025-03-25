@@ -141,7 +141,7 @@ type Object interface {
 
 ```go
 // 导出函数示例 - 使用大写字母开头即可，无需//export标记
-func Transfer(to Address, amount uint64) error {
+func Transfer(ctx Context, to Address, amount uint64) error {
     // 函数实现...
 }
 
@@ -153,7 +153,7 @@ type TransferParams struct {
 }
 
 // 自动生成的方法处理器
-func handleTransfer(paramsJSON []byte) int32 {
+func handleTransfer(ctx Context, paramsJSON []byte) int32 {
     var params TransferParams
     if err := json.Unmarshal(paramsJSON, &params); err != nil {
         // 错误处理...
@@ -164,7 +164,7 @@ func handleTransfer(paramsJSON []byte) int32 {
     setCurrentCallInfo(params.CallInfo)
     
     // 调用实际函数
-    err := Transfer(params.To, params.Amount)
+    err := Transfer(ctx, params.To, params.Amount)
     
     // 处理返回值...
 }

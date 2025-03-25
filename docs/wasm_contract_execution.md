@@ -7,7 +7,7 @@
 WebAssembly 智能合约的完整生命周期包括以下阶段：
 
 ```mermaid
-flowchart LR
+flowchart TB
     A[编写Go合约] --> B[验证源码]
     B --> C[编译为WebAssembly]
     C --> D[部署到区块链]
@@ -227,7 +227,7 @@ func (e *Engine) storeContractMetadata(addr vm.Address, metadata ContractMetadat
 // 为合约创建默认存储对象
 func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
     // 创建一个具有真实唯一ID的对象
-    objID := vm.GenerateObjectID()
+    objID := cover2objectID(contractAddr)
     
     defaultObject := &vm.Object{
         ID:    objID,           // 真实的唯一ID
@@ -240,9 +240,6 @@ func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
         return fmt.Errorf("failed to create default object: %w", err)
     }
     
-    // 记录合约与默认对象的关联，使其可以通过空ID访问
-    e.state.RegisterDefaultObject(contractAddr, objID)
-    
     // 记录创建事件
     e.eventEmitter.Emit("default_object_created", 
         "contract", contractAddr.String(),
@@ -253,7 +250,7 @@ func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
 ```
 
 这个默认Object具有以下特性：
-- 具有真实的唯一ID，但系统会注册特殊映射，使其可通过空ObjectID访问
+- 具有真实的唯一ID，但系统会注册特殊映射，使其可通过空ObjectID访问，默认是直接使用合约地址转换而成
 - 初始所有者设置为合约地址本身
 - 可以像其他对象一样转移所有权
 - 部署后立即可用，无需合约显式创建
@@ -264,46 +261,6 @@ func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
 ```go
 // 在合约代码中
 defaultObj, err := ctx.GetObject(ObjectID{}) // 传入空ObjectID
-```
-
-### 3.5 默认Object的内部实现
-
-在内部实现中，系统维护了一个从合约地址到默认Object ID的映射：
-
-```go
-// 内部映射表
-var contractDefaultObjects map[Address]ObjectID
-
-// 注册合约的默认对象
-func (s *State) RegisterDefaultObject(contractAddr Address, objID ObjectID) {
-    s.contractDefaultObjects[contractAddr] = objID
-}
-
-// 处理GetObject请求时的特殊逻辑
-func (s *State) GetObject(id ObjectID) (Object, error) {
-    // 检查是否为空ID请求
-    if id.IsZero() {
-        // 获取当前执行上下文中的合约地址
-        contractAddr := s.currentContext.ContractAddress
-        
-        // 查找该合约的默认对象真实ID
-        realID, exists := s.contractDefaultObjects[contractAddr]
-        if !exists {
-            return nil, errors.New("default object not found for contract")
-        }
-        
-        // 使用真实ID查找对象
-        return s.objects[realID], nil
-    }
-    
-    // 非空ID的正常查找逻辑
-    obj, exists := s.objects[id]
-    if !exists {
-        return nil, errors.New("object not found")
-    }
-    
-    return obj, nil
-}
 ```
 
 ## 4. 合约执行流程
@@ -408,8 +365,8 @@ func (e *Engine) instantiateModule(env *ExecutionEnvironment) (*wasmer.Instance,
         return nil, fmt.Errorf("failed to instantiate WASM module: %w", err)
     }
     
-    // 初始化主机缓冲区
-    if err := initHostBuffer(instance, env.Memory); err != nil {
+    // 初始化合约
+    if err := initializeContract(instance, env.Memory); err != nil {
         return nil, fmt.Errorf("failed to initialize host buffer: %w", err)
     }
     
@@ -417,22 +374,7 @@ func (e *Engine) instantiateModule(env *ExecutionEnvironment) (*wasmer.Instance,
 }
 ```
 
-### 4.4 设置执行状态
-
-在调用合约函数前，设置执行状态：
-
-```go
-// 设置执行状态
-func (e *Engine) setupExecutionState(addr vm.Address, sender vm.Address) {
-    // 设置当前交易信息
-    e.state.CurrentSender = sender
-    e.state.ContractAddress = addr
-    e.state.CurrentBlock = e.blockchain.GetLatestHeight()
-    e.state.CurrentTime = e.blockchain.GetLatestBlockTime()
-}
-```
-
-### 4.5 调用合约函数
+### 4.4 调用合约函数
 
 执行环境准备好后，系统通过统一的入口点调用合约函数：
 
@@ -563,38 +505,7 @@ func (e *Engine) handleCrossContractCall(sender Address, targetContract Address,
 
 ### 4.6 初始化与默认Object的访问
 
-系统保证合约始终可以通过空ObjectID访问其默认Object，这对于合约状态管理至关重要：
-
-```go
-// 从具有空ID的默认对象中读取数据
-func (ctx *vmContext) GetDefaultObjectField(field string) ([]byte, error) {
-    // 使用空ObjectID查找默认对象
-    obj, err := ctx.GetObject(vm.ObjectID{})
-    if err != nil {
-        return nil, fmt.Errorf("default object not found: %w", err)
-    }
-    
-    // 从对象中读取数据
-    return obj.GetField(field)
-}
-
-// 写入数据到默认对象
-func (ctx *vmContext) SetDefaultObjectField(field string, value []byte) error {
-    // 使用空ObjectID查找默认对象
-    obj, err := ctx.GetObject(vm.ObjectID{})
-    if err != nil {
-        return fmt.Errorf("default object not found: %w", err)
-    }
-    
-    // 检查权限 - 确保合约有权修改对象
-    if obj.Owner != ctx.contractAddress && !obj.HasWritePermission(ctx.contractAddress) {
-        return errors.New("no permission to modify object")
-    }
-    
-    // 写入数据到对象
-    return obj.SetField(field, value)
-}
-```
+系统保证合约始终可以通过空ObjectID访问其默认Object，这对于合约状态管理至关重要
 
 #### 4.6.1 默认Object所有权和权限管理
 
@@ -602,32 +513,18 @@ func (ctx *vmContext) SetDefaultObjectField(field string, value []byte) error {
 
 ```go
 // 转移默认Object所有权示例
-func TransferDefaultObjectOwnership(to Address) bool {
-    ctx := &Context{}
-    
+func TransferDefaultObjectOwnership(ctx core.Context, to Address) bool {
     // 获取默认Object
-    defaultObj, err := ctx.GetObject(ObjectID{})
-    if err != nil {
-        return false
-    }
+    defaultObj := ctx.GetObject(ObjectID{})
     
-    // 验证调用者为当前所有者
-    if defaultObj.Owner() != ctx.Sender() {
-        ctx.Log("error", "message", "only owner can transfer ownership")
-        return false
-    }
-    
-    // 可选：保留合约自身的写入权限
-    defaultObj.GrantWritePermission(ctx.ContractAddress())
-    
-    // 转移所有权
+    // 转移所有权，平台会验证object的owner是否为contract或sender
     defaultObj.SetOwner(to)
     
     return true
 }
 ```
 
-如果合约转移了默认Object的所有权但没有保留写入权限，将导致合约无法再修改该Object，除非新所有者将权限授予回合约。这可用于实现高级的权限控制或升级机制。
+如果合约转移了默认Object的所有权，将导致合约无法再修改该Object，除非新所有者通过交易修改。这可用于实现高级的权限控制或升级机制。
 
 默认Object在整个合约生命周期中的使用流程：
 
@@ -654,7 +551,6 @@ sequenceDiagram
         User->>VM: 调用转移所有权函数
         VM->>Contract: 执行转移逻辑
         Contract->>DefaultObj: 更改所有者为新地址
-        Note over DefaultObj: 权限变更，可设置保留合约的写入权限
     end
     
     User->>VM: 调用业务函数
@@ -663,7 +559,7 @@ sequenceDiagram
     VM->>VM: 查找映射获取真实ID
     VM->>DefaultObj: 访问真实对象
     Contract->>DefaultObj: 读取全局状态
-    alt 有写入权限
+    alt 有写入权限,新owner
         Contract->>DefaultObj: 更新全局状态 
     else 无写入权限
         DefaultObj->>Contract: 返回权限错误
@@ -688,8 +584,8 @@ func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) 
     // 读取参数JSON
     paramsJSON := readMemory(paramsPtr, paramsLen)
     
-    // 创建上下文（从主机环境获取信息）
-    ctx := createContextFromHostInfo()
+    // 创建上下文
+    ctx := createContext()
     
     // 查找函数处理器
     handler, found := dispatchTable[funcName]
@@ -715,23 +611,8 @@ func handleTransfer(ctx *Context, paramsJSON []byte) int32 {
     }
     json.Unmarshal(paramsJSON, &params)
     
-    // 使用mock模块记录函数调用开始
-    mock.Enter(ctx.ContractAddress(), "Transfer")
-    
-    // 设置延迟退出钩子（确保任何情况下都能记录函数退出）
-    defer func() {
-        // 捕获潜在的panic
-        if r := recover(); r != nil {
-            mock.Exit(ctx.ContractAddress(), "Transfer")
-            panic(r)  // 重新抛出panic
-        }
-    }()
-    
     // 调用实际业务函数
     result := Transfer(ctx, params.To, params.Amount)
-    
-    // 记录函数调用结束
-    mock.Exit(ctx.ContractAddress(), "Transfer")
     
     return result
 }
@@ -743,9 +624,8 @@ func handleTransfer(ctx *Context, paramsJSON []byte) int32 {
 2. **自动化上下文管理**：统一创建和管理执行上下文，确保所有函数调用都使用相同的上下文实例
 3. **统一参数处理**：集中处理参数解析和类型转换
 4. **跨合约调用优化**：合约内函数可以直接调用，避免序列化开销
-5. **完整执行追踪**：集成mock模块进行函数调用的精确追踪，支持性能分析和调试
 
-通过这种设计，系统提供了一个清晰的合约执行模型，既简化了开发者的工作，又保证了调用链的完整性和执行的可追踪性。
+通过这种设计，系统提供了一个清晰的合约执行模型。
 
 ### 4.8 自动生成的分发代码
 
@@ -777,7 +657,7 @@ func dispatchContractFunction(functionName string, paramsJSON []byte) int32 {
 }
 
 // 创建上下文对象的辅助函数
-func createContextFromHostInfo() *Context {
+func createContext() *Context {
     // 从主机环境获取信息
     senderPtr, senderLen, _ := callHost(FuncGetSender, nil)
     senderBytes := readMemory(senderPtr, senderLen)
@@ -834,8 +714,8 @@ mock 模块主要负责以下职责：
 1. **函数调用追踪**：记录合约函数的进入和退出
 2. **调用链管理**：维护完整的嵌套调用关系
 3. **跨合约调用识别**：识别并记录跨合约调用的来源和目标
-4. **执行时间监控**：测量函数执行时间
-5. **资源使用跟踪**：观察资源消耗模式
+
+在处理合约代码的时候，自动注入到合约的所有的Public function里
 
 ```go
 // mock 模块核心接口
@@ -843,62 +723,12 @@ package mock
 
 // 函数调用进入时的钩子
 func Enter(contractAddress Address, functionName string) {
-    // 记录函数调用开始
     // 维护调用栈信息
-    // 记录调用时间戳
 }
 
 // 函数调用退出时的钩子
 func Exit(contractAddress Address, functionName string) {
-    // 记录函数调用结束
     // 清理调用栈
-    // 计算执行时间
-}
-
-// 记录跨合约调用
-func RecordCrossContractCall(fromContract Address, fromFunction string, 
-                            toContract Address, toFunction string) {
-    // 记录跨合约调用信息
-    // 不需要在主机环境进行同步
-}
-```
-
-#### 4.9.2 自主的上下文管理
-
-与传统的设计不同，本系统中 mock 模块能够自主管理合约上下文，无需主机环境的干预：
-
-```go
-// 编译期自动生成的代码中包含上下文管理
-// 自动生成的包装函数
-func handleTransfer(ctx *Context, paramsJSON []byte) int32 {
-    // 解析参数
-    var params struct {
-        To     Address `json:"to"`
-        Amount uint64  `json:"amount"`
-    }
-    json.Unmarshal(paramsJSON, &params)
-    
-    // 调用进入钩子 - 只传递必要信息
-    mock.Enter(ctx.ContractAddress(), "Transfer")
-    
-    // 设置上下文中的调用信息
-    recordCurrentCall(ctx.ContractAddress(), "Transfer")
-    
-    // 无论如何都会执行退出钩子
-    defer func() {
-        if r := recover(); r != nil {
-            mock.Exit(ctx.ContractAddress(), "Transfer")
-            panic(r) // 重新抛出panic
-        }
-    }()
-    
-    // 调用实际函数
-    status := Transfer(ctx, params.To, params.Amount)
-    
-    // 记录退出信息
-    mock.Exit(ctx.ContractAddress(), "Transfer")
-    
-    return status
 }
 ```
 
@@ -986,7 +816,7 @@ func (e *Engine) executeContractCall(request []byte) (interface{}, error) {
    - 避免了不必要的状态管理操作
    - 每个合约实例独立执行，利于并行化
 
-这种方法使得跨合约调用更加清晰和可维护，同时 mock 模块仍能在合约内部维护完整的调用链信息用于审计和调试。
+这种方法使得跨合约调用更加清晰和可维护，同时 mock 模块仍能在合约内部维护完整的调用链信息。
 
 #### 4.9.4 轻量级事件记录
 
@@ -1013,25 +843,23 @@ mock 模块采用轻量级设计，只记录必要的执行信息：
    - 确保调用者信息的正确传递
 
 2. **Mock模块职责**：
-   - 自主管理调用链信息
+   - 自主管理wasi内调用链信息
    - 记录函数执行开始和结束
    - 维护嵌套调用的调用栈
-   - 支持完整的调用树构建
 
-这种职责分离使得系统架构更加清晰，减少了主机环境的复杂性，同时通过合约内的自动化机制保持了完整的调用链追踪能力。
+这种职责分离使得系统架构更加清晰，减少了主机环境的复杂性。
 
 ## 5. 参数传递与结果获取
 
 ### 5.1 调用链信息传递
 
-在跨合约调用中，系统使用调用者信息传递机制，通过合约内 mock 模块维护调用链：
+在跨合约调用中，系统使用调用者信息传递机制：
+1. ctx.Call：host通过创建新的执行环境engine，wasi->host传递sender(合约地址)、contract.function(args)
+2. package.function: 通过import的方式，直接引用了目标合约的代码，会被编译到同一个“.wasm”执行文件里，这种是通过在public function里注入mock.Enter/Exit的方式记录
 
 ```go
 // 在合约内实现的跨合约调用
 func (ctx *Context) Call(contract Address, function string, args ...interface{}) ([]byte, error) {
-    // 记录调用信息 - 供mock模块管理调用链
-    mock.RecordCrossContractCall(ctx.ContractAddress(), getCurrentFunction(), contract, function)
-    
     // 准备调用参数 - 只传递必要信息
     callData := struct {
         Sender   Address  `json:"sender"`   // 作为调用者标识
@@ -1117,7 +945,8 @@ sequenceDiagram
     participant User as 用户/调用者
     participant VM as 虚拟机引擎
     participant WasmRuntime as Wasmer运行时
-    participant Contract as 合约代码
+    participant Contract as 合约代码1
+    participant Contract2 as 合约代码2
     participant State as 区块链状态
     
     User->>VM: 调用合约(地址, 函数, 参数)
@@ -1135,10 +964,23 @@ sequenceDiagram
     
     WasmRuntime->>Contract: 调用合约函数
     
-    Contract->>WasmRuntime: 调用宿主函数
-    WasmRuntime->>State: 读取/修改状态
-    State->>WasmRuntime: 返回结果
+    rect rgb(74, 71, 78)
+    Note right of Contract: 合约调用方式1
+    Contract->>WasmRuntime: 调用宿主函数Call
+    WasmRuntime->>Contract2: 执行合约逻辑
+    Contract2->>State: 读取/修改状态
+    State->>Contract2: 返回结果
+    Contract2->>WasmRuntime: 返回结果
     WasmRuntime->>Contract: 返回结果
+    end
+    
+    rect rgb(66, 56, 77)
+    Note right of Contract: 合约调用方式2
+    Contract->>Contract2: 调用其他合约函数
+    Contract2->>State: 读取/修改状态
+    State->>Contract2: 返回结果
+    Contract2->>Contract: 返回结果
+    end
     
     Contract->>WasmRuntime: 返回执行结果
     WasmRuntime->>VM: 处理返回值
@@ -1157,10 +999,13 @@ flowchart TD
     D --> E[执行合约]
     
     E --> F{跨合约调用?}
-    F -- 是 --> G[创建新Engine实例]
+    F -- 是 --> F1[调用方式]
+    F1 -- import --> F2[合约内mock模块记录]
+    F1 -- ctx.Call --> G[创建新Engine实例]
     G --> H[准备调用参数]
     H --> I[合约内mock模块记录]
     I --> J[新合约执行]
+    F2--> J
     J --> K[返回结果给调用方]
     K --> E
     
@@ -1202,8 +1047,7 @@ flowchart TD
    - 在合约调用的入口点注入调用链信息
    - 跨合约调用创建新的引擎实例执行
    - 通过合约内的 mock 模块自动维护调用链信息
-   - 合约函数执行前后通过 mock.Enter 和 mock.Exit 记录
-   - 支持嵌套调用场景的完整调用链构建
+     - 合约的公共函数入口通过 mock.Enter 和 mock.Exit 记录
 
 2. **参数传递**：
    - 使用直接JSON序列化确保高效的数据传递
@@ -1327,11 +1171,6 @@ type ExecutionResources struct {
     TableSize       uint32 // 函数表大小
     FuelLimit       uint64 // 燃料限制
     ExecutionTimeout int64 // 执行超时 (毫秒)
-    
-    // 功能开关
-    EnableSIMD       bool  // 启用SIMD指令
-    EnableThreads    bool  // 启用线程支持
-    EnableBulkMemory bool  // 启用批量内存操作
 }
 
 // 默认资源配置
@@ -1341,9 +1180,6 @@ var DefaultResources = ExecutionResources{
     TableSize:       1024,             // 1K函数表项
     FuelLimit:       10_000_000,       // 1千万燃料单位
     ExecutionTimeout: 5000,            // 5秒
-    EnableSIMD:      false,
-    EnableThreads:   false,
-    EnableBulkMemory: true,
 }
 ```
 
@@ -1353,7 +1189,7 @@ WebAssembly合约执行过程中的错误处理：
 
 ### 9.1 合约内错误
 
-合约内部错误通过返回约定的错误码或错误结构处理：
+合约内部错误通过返回约定的错误码或错误结构处理，如果是严重错误直接使用panic：
 
 ```go
 // 在合约中返回错误
@@ -1361,6 +1197,11 @@ if err != nil {
     // 设置错误标志并返回错误码
     ctx.SetError(err.Error())
     return -1
+}
+
+// 在合约中不允许错误
+if err != nil {
+    panic(err)
 }
 ```
 
@@ -1449,21 +1290,14 @@ flowchart TD
 
 ```go
 // 原始合约函数
-//export transfer
-func transfer(to Address, amount uint64) error {
+func Transfer(ctx core.Context, to Address, amount uint64) error {
     // 实现转账逻辑
 }
 
 // 自动生成的参数结构体
 type TransferParams struct {
-    CallInfo *CallInfo `json:"call_info"` // 自动注入的调用链信息
     To       Address   `json:"to"`        // 第一个参数
     Amount   uint64    `json:"amount"`    // 第二个参数
-}
-
-// 自动生成的返回值结构体
-type TransferResult struct {
-    Error string `json:"error,omitempty"` // 错误信息（如果有）
 }
 ```
 
@@ -1493,7 +1327,7 @@ func dispatchMethod(name string, paramsJSON []byte) []byte {
 }
 
 // 函数包装示例
-func wrapTransfer(paramsJSON []byte) []byte {
+func wrapTransfer(ctx core.Context, paramsJSON []byte) []byte {
     // 1. 反序列化参数
     var params TransferParams
     if err := json.Unmarshal(paramsJSON, &params); err != nil {
@@ -1503,7 +1337,7 @@ func wrapTransfer(paramsJSON []byte) []byte {
     }
     
     // 2. 调用实际函数
-    err := transfer(params.To, params.Amount)
+    err := Transfer(ctx, params.To, params.Amount)
     
     // 3. 封装结果
     result := &TransferResult{}
@@ -1570,7 +1404,7 @@ import (
 // 为每个函数生成参数和结果结构体
 {{ range .Functions }}
 type {{ .Name }}Params struct {
-    CallInfo *CallInfo {{ .ParamsFields }}
+    {{ .ParamsFields }}
 }
 
 type {{ .Name }}Result struct {

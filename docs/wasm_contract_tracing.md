@@ -30,12 +30,11 @@ flowchart LR
 
 在编译 Go 合约代码为 WebAssembly 时，系统会自动在所有跨合约调用点插入额外代码，以便追踪调用链和确保正确的合约身份识别：
 
-1. **编译期分析**：在 TinyGo 编译合约代码前，系统会分析源代码中所有可能的跨合约调用点，包括但不限于 Context.Call 方法的使用。
+1. **编译期分析**：在 TinyGo 编译合约代码前，系统会分析源代码中所有可能的跨合约调用点，包括但不限于 Context.Call/Public function。
 
-2. **代码注入**：对每个跨合约调用点，自动插入以下信息：
-   - 当前合约地址
-   - 当前函数名称
-   - 调用链路径
+2. **代码注入**：对每个Public Function入口，自动插入以下信息：
+   - mock.Enter(当前合约地址,当前函数名称)
+   - mock.Exit(当前合约地址,当前函数名称)
 
 3. **生成包装代码**：创建 WASI 包装代码时，会添加必要的上下文传递逻辑，确保每次合约交互都能传递调用链信息。
 
@@ -54,11 +53,11 @@ wrapperCode := generateWASIWrapper(packageName, functions, code)
 2. **导入合约直接调用**：通过 import 其他合约并使用 `package.function()` 方式直接调用的情况
 3. **特殊操作调用**：合约执行导致状态变更的关键操作
 
-每个插桩点都会自动添加必要的代码以维护调用链信息，而无需开发者手动实现。
+每个插桩点都会在合约包装时自动添加，而无需开发者手动实现。
 
 ### 2.3 调用信息结构
 
-系统使用 `CallInfo` 结构来传递调用者信息：
+系统使用 `mock.CallInfo` 结构来维护调用者信息：
 
 ```go
 // 调用信息结构
@@ -86,10 +85,10 @@ import (
     "github.com/example/token"  // 导入代币合约包
 )
 
-func transferTokens(to Address, amount uint64) error {
+func transferTokens(ctx core.Context, to Address, amount uint64) error {
     // 直接调用导入包中的函数
     // 系统会自动对这类调用进行插桩
-    return token.Transfer(to, amount)
+    return token.Transfer(ctx, to, amount)
 }
 ```
 
@@ -116,7 +115,6 @@ func Enter(contractAddress Address, functionName string) {
     // 记录函数调用开始
     // 维护调用栈信息
     // 记录调用时间戳
-    // 只记录必要信息，不保存完整参数以节省资源
 }
 
 // 函数调用退出时的钩子
@@ -124,7 +122,6 @@ func Exit(contractAddress Address, functionName string) {
     // 记录函数调用结束
     // 清理调用栈
     // 计算执行时间
-    // 仅记录状态码，不保存详细结果以减少开销
 }
 ```
 
@@ -132,13 +129,15 @@ func Exit(contractAddress Address, functionName string) {
 
 ```go
 // 原始合约函数 - 大写字母开头的函数会被自动导出
-func Transfer(to Address, amount uint64) int32 {
+func Transfer(ctx core.Context, to Address, amount uint64) int32 {
+    mock.Enter(ctx.ContractAddress(), "Transfer")
+    defer mock.Exit(ctx.ContractAddress(), "Transfer")
     // 业务逻辑
     return SuccessCode
 }
 
 // 生成的包装函数（系统自动添加）
-func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
+func handleTransfer(ctx core.Context, paramsPtr int32, paramsLen int32) int32 {
     // 解析参数
     paramsBytes := readMemory(paramsPtr, paramsLen)
     var params struct {
@@ -148,26 +147,8 @@ func handleTransfer(paramsPtr int32, paramsLen int32) int32 {
     }
     json.Unmarshal(paramsBytes, &params)
     
-    // 设置当前调用上下文
-    setCurrentCallInfo(params.CallInfo)
-    
-    // 调用进入钩子 - 只传递合约地址和函数名，不传递详细参数
-    mock.Enter(getCurrentContractAddress(), "Transfer")
-    
-    // 延迟执行退出钩子，确保无论函数如何返回都会被调用
-    defer func() {
-        if r := recover(); r != nil {
-            // 只记录基本信息，不记录详细错误内容
-            mock.Exit(getCurrentContractAddress(), "Transfer")
-            panic(r) // 重新抛出panic
-        }
-    }()
-    
     // 调用实际函数
-    status := Transfer(params.To, params.Amount)
-    
-    // 记录基本退出信息，不包含详细结果
-    mock.Exit(getCurrentContractAddress(), "Transfer")
+    status := Transfer(ctx, params.To, params.Amount)
     
     return status
 }
@@ -215,80 +196,20 @@ flowchart TD
     style I fill:#bbf,stroke:#333
 ```
 
-## 3. Context 接口增强
+## 3. Sender 方法
 
 为支持调用链追踪，系统增强了合约执行环境以包含调用者信息：
-
-### 3.1 执行上下文增强
-
-```go
-// 增强的执行上下文
-type Context struct {
-    contractAddr    Address     // 当前合约地址
-    currentContract Address     // 当前执行上下文的合约
-    currentFunction string      // 当前函数名
-    callChain       []CallFrame // 调用链栈
-    // ...其他原有属性
-}
-```
-
-### 3.2 自动注入实现
-
-系统对所有跨合约交互进行了增强，以自动注入和传递调用者信息：
-
-```go
-// 增强的跨合约调用实现
-func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
-    // 自动注入合约信息
-    c.currentContract = c.contractAddr  // 由系统自动设置
-    c.currentFunction = getFunctionNameFromCallSite()  // 通过编译期注入获取
-    
-    // 构建调用信息
-    callInfo := &CallInfo{
-        CallerContract: c.currentContract,
-        CallerFunction: c.currentFunction,
-        CallChain: append([]CallFrame{}, c.callChain...),  // 复制当前调用链
-    }
-    
-    // 将当前调用推入调用链
-    c.callChain = append(c.callChain, CallFrame{
-        Contract: c.currentContract,
-        Function: c.currentFunction,
-    })
-    
-    // 在调用结束后恢复调用链
-    defer func() {
-        if len(c.callChain) > 0 {
-            c.callChain = c.callChain[:len(c.callChain)-1]
-        }
-    }()
-    
-    // 将调用信息添加到参数中
-    enhancedArgs := append([]any{callInfo}, args...)
-    
-    // 序列化参数
-    serializedArgs, err := json.Marshal(enhancedArgs)
-    if err != nil {
-        return nil, fmt.Errorf("failed to serialize args: %v", err)
-    }
-    
-    // 执行实际调用
-    return c.originalCall(contract, function, serializedArgs)
-}
-```
-
-其他可能导致跨合约交互的操作也会被类似增强，确保调用链信息在所有合约交互中保持一致。
-
-### 3.3 Sender 方法增强
 
 Sender 方法被增强以返回实际的调用者，而不仅仅是交易发起者：
 
 ```go
 // 增强的 Sender 方法
 func (c *Context) Sender() Address {
-    // 如果是跨合约调用，返回调用者合约地址
-    if c.isContractCall && !c.currentContract.IsZero() {
-        return c.currentContract
+    callerAddr := mock.GetCaller()
+
+    // 如果调用者地址不为空,返回调用者地址
+    if !callerAddr.IsZero() {
+        return callerAddr
     }
     
     // 否则返回交易原始发送者
@@ -297,57 +218,6 @@ func (c *Context) Sender() Address {
     var addr Address
     copy(addr[:], data)
     return addr
-}
-```
-
-### 3.4 完整的Context接口定义
-
-以下是完整的Context接口定义，注意基础状态操作不返回错误：
-
-```go
-// Context接口 - 智能合约的执行上下文
-type Context interface {
-    // 区块链状态
-    BlockHeight() uint64          // 获取当前区块高度
-    BlockTime() int64             // 获取当前区块时间戳
-    ContractAddress() Address     // 获取当前合约地址
-    
-    // 账户相关
-    Sender() Address              // 获取交易发送者
-    Balance(addr Address) uint64  // 获取账户余额
-    Transfer(to Address, amount uint64) error // 转账操作
-    
-    // 对象存储 - 基础状态操作使用panic而非返回error
-    CreateObject() Object                     // 创建新对象，失败时panic
-    GetObject(id ObjectID) (Object, error)    // 获取对象，可能返回error
-    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
-    DeleteObject(id ObjectID)                 // 删除对象，失败时panic
-    
-    // 合约交互
-    Call(contract Address, function string, args ...any) ([]byte, error)
-    
-    // 日志与事件
-    Log(event string, keyValues ...interface{}) // 记录事件
-    
-    // 调用链信息
-    CallerContract() Address      // 获取调用者合约地址
-    CallerFunction() string       // 获取调用者函数名
-    GetCallChain() []CallFrame    // 获取完整调用链
-}
-```
-
-与之相应的Object接口定义：
-
-```go
-// Object接口 - 状态对象
-type Object interface {
-    ID() ObjectID              // 获取对象ID
-    Owner() Address            // 获取所有者
-    SetOwner(owner Address)    // 设置所有者，失败时panic
-    
-    // 数据操作
-    Get(field string, value interface{}) error // 获取字段值，可能返回error
-    Set(field string, value interface{}) error // 设置字段值，可能返回error
 }
 ```
 
@@ -361,7 +231,7 @@ type Object interface {
 
 ```go
 // 原始合约函数 - 大写字母开头的函数会被自动导出
-func Transfer(to Address, amount uint64) error {
+func Transfer(ctx core.Context, to Address, amount uint64) error {
     // 业务逻辑实现...
 }
 
@@ -400,18 +270,11 @@ func handleTransfer(paramsJSON []byte) int32 {
 ```go
 // 在调用端（调用其他合约）
 func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
-    // 构建调用信息
-    callInfo := &CallInfo{
-        CallerContract: c.ContractAddress(),
-        CallerFunction: getCurrentFunction(),
-        CallChain:      append([]CallFrame{}, c.callChain...),
-    }
-    
     // 根据函数名自动识别并构建正确的参数结构体
     paramsStruct := createParamsStruct(function, args)
     
     // 注入调用信息
-    setCallInfoField(paramsStruct, callInfo)
+    setCallInfoField(paramsStruct, mock.CurrentContract())
     
     // 序列化参数结构体
     paramsJSON, err := json.Marshal(paramsStruct)
@@ -469,9 +332,6 @@ func handleTransfer(paramsJSON []byte) int32 {
         writeResult(resultJSON)
         return ErrorCodeInvalidParams
     }
-    
-    // 设置当前调用上下文
-    setCurrentCallInfo(params.CallInfo)
     
     // 调用实际函数
     err := Transfer(params.To, params.Amount)
@@ -572,49 +432,19 @@ obj.SetOwner(newOwner)
 
 ```go
 // 基于调用者实现权限控制
-func isAuthorized(caller Address, function string) bool {
-    // 检查调用者是否在白名单中
-    for _, allowed := range allowedCallers {
-        if caller == allowed {
-            return true
-        }
+func (o *Object) SetOwner(owner Address) {
+    // 设置对象所有者 - 基础状态操作，失败时会panic
+    owner := o.Owner()
+    if owner != ctx.Sender() && owner != mock.CurrentAddress(){
+        panic("wrong owner")
     }
     
-    // 检查特定函数的特殊权限
-    if specialFunctionPermissions[function] != nil {
-        return specialFunctionPermissions[function](caller)
-    }
-    
-    return false
+    // 操作owner切换
+    ...
 }
 ```
 
-### 5.2 审计与日志
-
-自动记录调用链信息，便于审计和问题排查：
-
-```go
-// 记录所有跨合约调用
-func logContractCall(ctx *Context, callInfo *CallInfo, function string) {
-    // 记录基本调用信息
-    ctx.Log("contract_call",
-            "caller", callInfo.CallerContract.String(),
-            "caller_function", callInfo.CallerFunction,
-            "target_function", function)
-    
-    // 如果调用链较长，记录完整调用链
-    if len(callInfo.CallChain) > 1 {
-        chainInfo := make([]string, len(callInfo.CallChain))
-        for i, frame := range callInfo.CallChain {
-            chainInfo[i] = fmt.Sprintf("%s.%s", frame.Contract.String(), frame.Function)
-        }
-        
-        ctx.Log("call_chain", "path", strings.Join(chainInfo, " -> "))
-    }
-}
-```
-
-### 5.3 重入攻击防护
+### 5.2 重入攻击防护
 
 通过检查调用链，可以有效防止重入攻击：
 
@@ -631,7 +461,7 @@ func detectReentrancy(callChain []CallFrame, currentContract Address) bool {
 }
 ```
 
-### 5.4 不同调用模式的对比
+### 5.3 不同调用模式的对比
 
 WebAssembly智能合约系统支持两种主要的跨合约调用模式，每种模式都会自动维护调用链信息：
 
@@ -656,52 +486,6 @@ flowchart LR
 
 无论采用何种方式，系统都会自动维护完整的调用者信息和调用链。
 
-### 5.5 完整调用树追踪
-
-使用自动添加的 mock 钩子函数，可以构建完整的调用树，用于监控和调试：
-
-```go
-// 在监控系统中收集完整的调用树
-func buildCallTree(records []CallRecord) *CallTreeNode {
-    root := &CallTreeNode{}
-    stack := []*CallTreeNode{root}
-    
-    for _, record := range records {
-        if record.Type == "Enter" {
-            // 创建新节点并添加到当前栈顶节点的子节点中
-            node := &CallTreeNode{
-                Contract:    record.Contract,
-                Function:    record.Function,
-                StartTime:   record.Timestamp,
-                Parameters:  record.Parameters,
-            }
-            
-            current := stack[len(stack)-1]
-            current.Children = append(current.Children, node)
-            
-            // 将新节点推入栈
-            stack = append(stack, node)
-        } else if record.Type == "Exit" {
-            // 从栈中弹出节点，计算执行时间并记录结果
-            if len(stack) > 1 {
-                current := stack[len(stack)-1]
-                current.EndTime = record.Timestamp
-                current.Duration = current.EndTime - current.StartTime
-                current.Status = record.Status
-                current.Result = record.Result
-                
-                // 弹出栈
-                stack = stack[:len(stack)-1]
-            }
-        }
-    }
-    
-    return root
-}
-```
-
-这样构建的调用树可以用于性能分析、瓶颈识别和问题排查，提供了比简单调用链更详细的执行信息。
-
 ## 6. 代码示例
 
 ### 6.1 代币合约与交易所合约交互示例
@@ -711,9 +495,7 @@ func buildCallTree(records []CallRecord) *CallTreeNode {
 ```go
 // 在交易所合约中
 // 大写字母开头的函数会被自动导出
-func SwapTokens(fromToken Address, toToken Address, amount uint64) int32 {
-    ctx := vm.GetContext()
-    
+func SwapTokens(ctx core.Context, fromToken Address, toToken Address, amount uint64) int32 {
     // 调用第一个代币合约 - 系统会自动注入调用者信息
     result, err := ctx.Call(fromToken, "TransferFrom", ctx.Sender(), ctx.ContractAddress(), amount)
     if err != nil {
@@ -748,23 +530,8 @@ func SwapTokens(fromToken Address, toToken Address, amount uint64) int32 {
 func Transfer(to Address, amount uint64) int32 {
     ctx := vm.GetContext()
     
-    // 系统底层自动反序列化参数并提取调用信息
-    // 开发者不需要显式处理这些细节
-    
-    // 获取调用者信息(系统自动提供)
-    callerContract := ctx.CallerContract()
-    callerFunction := ctx.CallerFunction()
-    
-    // 检查调用者是否有权限
-    if !isApprovedSpender(ctx.Sender(), callerContract) {
-        ctx.Log("unauthorized_transfer", 
-                "caller", callerContract.String(),
-                "from", ctx.Sender().String())
-        return ErrorUnauthorized
-    }
-    
     // 检查余额
-    balanceObj, err := ctx.GetObject(getBalanceObjectID(ctx.Sender()))
+    balanceObj, err := ctx.GetObjectWithOwner(ctx.Sender())
     if err != nil {
         return ErrorBalanceNotFound
     }
@@ -781,34 +548,23 @@ func Transfer(to Address, amount uint64) int32 {
     // 执行转账
     balance -= amount
     if err := balanceObj.Set("amount", balance); err != nil {
-        return ErrorUpdateBalanceFailed
+        panic(ErrorUpdateBalanceFailed)
     }
     
-    // 更新接收者余额
-    recipientBalanceObj, err := ctx.GetObject(getBalanceObjectID(to))
-    if err != nil {
-        // 如果接收者没有余额对象，创建一个
-        // CreateObject是基础状态操作，失败时会panic而不是返回error
-        recipientBalanceObj = ctx.CreateObject()
-        
-        // SetOwner也是基础状态操作，失败时会panic
-        recipientBalanceObj.SetOwner(to)
-    }
+    // 如果接收者没有余额对象，创建一个
+    // CreateObject是基础状态操作，失败时会panic而不是返回error
+    recipientBalanceObj = ctx.CreateObject()
     
-    var recipientBalance uint64
-    recipientBalanceObj.Get("amount", &recipientBalance) // 忽略错误，可能是新创建的对象
-    
-    recipientBalance += amount
-    if err := recipientBalanceObj.Set("amount", recipientBalance); err != nil {
-        return ErrorUpdateRecipientFailed
+    if err := recipientBalanceObj.Set("amount", amount); err != nil {
+        panic(ErrorUpdateRecipientFailed)
     }
+    // SetOwner也是基础状态操作，失败时会panic
+    recipientBalanceObj.SetOwner(to)
     
     // 记录转账事件
     ctx.Log("transfer",
-            "caller_contract", callerContract.String(),
-            "caller_function", callerFunction,
-            "from", ctx.Sender().String(),
-            "to", to.String(),
+            "from", ctx.Sender(),
+            "to", to,
             "amount", amount)
     
     return SuccessCode
@@ -822,9 +578,7 @@ func Transfer(to Address, amount uint64) int32 {
 ```go
 // 在用户界面合约中 (DApp合约)
 // 大写字母开头的函数会被自动导出
-func ExecuteComplexTransaction(userData TransactionData) int32 {
-    ctx := vm.GetContext()
-    
+func ExecuteComplexTransaction(ctx core.Context, userData TransactionData) int32 {
     // 调用业务逻辑合约
     result, err := ctx.Call(businessLogicContract, "ProcessTransaction", userData)
     if err != nil {
@@ -837,9 +591,7 @@ func ExecuteComplexTransaction(userData TransactionData) int32 {
 
 // 在业务逻辑合约中
 // 大写字母开头的函数会被自动导出
-func ProcessTransaction(data TransactionData) int32 {
-    ctx := vm.GetContext()
-    
+func ProcessTransaction(ctx core.Context, data TransactionData) int32 {
     // 系统自动反序列化参数并提取调用信息
     
     // 验证是否由授权的UI合约调用
@@ -861,21 +613,7 @@ func ProcessTransaction(data TransactionData) int32 {
 package liquidity
 
 // 大写字母开头的函数会被自动导出
-func Swap(inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
-    ctx := vm.GetContext()
-    
-    // 系统自动提取调用信息
-    
-    // 获取实际调用者 - 这里会是dapp合约地址
-    callerContract := ctx.CallerContract()
-    
-    // 检查调用者权限
-    if !isAuthorizedCaller(callerContract) {
-        ctx.Log("unauthorized_swap",
-                "caller", callerContract.String())
-        return ErrorUnauthorizedCaller
-    }
-    
+func Swap(ctx core.Context, inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
     // 安全地执行交换...
     
     return SuccessCode
@@ -900,9 +638,7 @@ import (
 // 导入合约在执行环境中已关联到对应的链上合约地址
 
 // 大写字母开头的函数会被自动导出
-func ExecuteSwap(inputToken Address, outputToken Address, amount uint64) int32 {
-    ctx := vm.GetContext()
-    
+func ExecuteSwap(ctx core.Context, inputToken Address, outputToken Address, amount uint64) int32 {
     // 检查发送者余额 - 通过导入的合约包直接调用
     // 系统会自动插桩这个调用，注入当前合约信息
     balance, err := token.BalanceOf(ctx.Sender(), inputToken)
@@ -924,7 +660,7 @@ func ExecuteSwap(inputToken Address, outputToken Address, amount uint64) int32 {
     }
     
     // 执行交换 - 通过导入的合约包直接调用
-    receivedAmount, err := liquidity.Swap(inputToken, outputToken, amount, ctx.Sender())
+    receivedAmount, err := liquidity.Swap(ctx, inputToken, outputToken, amount, ctx.Sender())
     if err != nil {
         return ErrorSwapFailed
     }
@@ -949,9 +685,7 @@ func ExecuteSwap(inputToken Address, outputToken Address, amount uint64) int32 {
 package liquidity
 
 // 大写字母开头的函数会被自动导出
-func Swap(inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
-    ctx := vm.GetContext()
-    
+func Swap(ctx core.Context, inputToken Address, outputToken Address, amount uint64, recipient Address) int32 {
     // 系统自动提取调用信息
     
     // 获取实际调用者 - 这里会是dapp合约地址
@@ -979,9 +713,7 @@ func Swap(inputToken Address, outputToken Address, amount uint64, recipient Addr
 package token
 
 // 大写字母开头的函数会被自动导出
-func Transfer(to Address, amount uint64) int32 {
-    ctx := vm.GetContext()
-    
+func Transfer(ctx core.Context, to Address, amount uint64) int32 {
     // 获取发送者
     from := ctx.Sender()
     

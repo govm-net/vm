@@ -8,20 +8,24 @@ WebAssembly 智能合约接口系统采用双向通信架构，包含两个主�
 
 ```mermaid
 flowchart LR
-    A[合约代码<br>wasm/contract.go] <--> B[主机环境<br>host/main.go]
+    A[合约代码] <--> B[主机环境]
     B <--> C[区块链状态]
     
     subgraph 合约代码
-        A1[导出接口] --> A2[上下文实现] --> A3[内存管理]
+        A1[导出接口]<-->A2[上下文实现]
+        A2<-->A3[内存管理]
+        A3<-->A4[业务合约逻辑]
     end
     
     subgraph 主机环境
-        B1[函数导入] --> B2[状态管理] --> B3[资源控制]
+        B1[函数导入]<-->B2[状态管理]
+        B2<-->B3[资源控制]
+        B3<-->B4[权限控制]
     end
 ```
 
 - **合约侧接口 (wasm/contract.go)**: 提供面向合约开发者的 API，实现 Context 和 Object 接口
-- **主机侧接口 (host/main.go)**: 实现合约调用的宿主函数，管理状态和资源
+- **主机侧接口 (host/runner.go)**: 实现合约调用的宿主函数，管理状态和资源
 
 ## 2. 合约侧接口详解
 
@@ -33,7 +37,7 @@ WebAssembly合约有两类函数会被导出：
 
 #### 2.1.1 基础必需的导出函数
 
-这些函数是与WebAssembly运行时交互所必需的基础函数，每个合约都必须实现：
+这些函数是与WebAssembly运行时交互所必需的基础函数，每个wasi都必须实现，由框架统一提供：
 
 ```go
 //export allocate
@@ -49,10 +53,8 @@ func deallocate(ptr int32, size int32) {
     // 在WebAssembly中，这个函数可能是空实现
 }
 
-//export set_host_buffer
-func set_host_buffer(ptr int32) {
-    // 设置主机缓冲区地址 - 用于高效数据传递
-    hostBufferPtr = ptr
+//export handle_contract_call
+func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) int32{
 }
 ```
 
@@ -64,23 +66,19 @@ func set_host_buffer(ptr int32) {
 
 ```go
 // 公开函数 - 自动导出
-func Hello() int32 {
-    // 合约示例函数
-    ctx := &Context{}
+func Hello(ctx core.Context) int32 {
     ctx.Log("hello", "world")
     return 1
 }
 
 // 公开函数 - 自动导出
 func ProcessData(dataPtr int32, dataLen int32) int32 {
-    // 处理数据的示例函数
-    data := readMemory(dataPtr, dataLen)
     // 业务逻辑处理
-    return sum
+    return 1
 }
 
 // 公开函数 - 自动导出
-func TransferToken(toPtr int32, amount int64) int32 {
+func TransferToken(ctx core.Context, toPtr int32, amount int64) int32 {
     // 转账示例函数
     // ...
 }
@@ -124,19 +122,20 @@ func call_host_set(funcID, argPtr, argLen int32) int64
 
 //export call_host_get_buffer
 func call_host_get_buffer(funcID, argPtr, argLen int32) int32
+
+//export get_block_height
+func get_block_height() int64
+
+//export get_block_time
+func get_block_time() int64
+
+//export get_balance
+func get_balance(addrPtr int32) uint64
 ```
 
 ### 2.3 内存管理机制
 
 合约代码采用统一的缓冲区管理方案：
-
-```go
-// 定义全局接收数据缓冲区的大小
-const HostBufferSize int32 = 2048
-
-// 使用全局变量存储动态分配的主机缓冲区地址
-var hostBufferPtr int32 = 0
-```
 
 主要内存操作函数：
 
@@ -184,17 +183,11 @@ type Context interface {
 
 // Context 实现
 func (c *Context) BlockHeight() uint64 {
-    // 获取当前区块高度
-    ptr, size, _ := callHost(FuncGetBlockHeight, nil)
-    data := readMemory(ptr, size)
-    return binary.LittleEndian.Uint64(data)
+    return get_block_height()
 }
 
 func (c *Context) BlockTime() int64 {
-    // 获取当前区块时间
-    ptr, size, _ := callHost(FuncGetBlockTime, nil)
-    data := readMemory(ptr, size)
-    return int64(binary.LittleEndian.Uint64(data))
+    return get_block_time()
 }
 
 func (c *Context) ContractAddress() Address {
@@ -224,9 +217,8 @@ func (c *Context) Balance(addr Address) uint64 {
         return 0
     }
     
-    ptr, size, _ := callHost(FuncGetBalance, data)
-    resultData := readMemory(ptr, size)
-    return binary.LittleEndian.Uint64(resultData)
+    ptr, _, _ := callHost(FuncGetBalance, data)
+    return get_balance(ptr)
 }
 
 func (c *Context) Transfer(to Address, amount uint64) error {
@@ -317,6 +309,10 @@ func (c *Context) DeleteObject(id ObjectID) {
 ### 2.5 Object 接口实现
 
 Object 接口提供状态对象的操作方法：
+
+1. 合约只能看到属于当前合约的Object（实现的时候有Type=ContractAddress）
+2. 合约可以查看当前用户和其他用户的Object
+3. 合约只能编辑Owner为Sender/Contract的Object
 
 ```go
 // Object 接口定义
@@ -473,25 +469,6 @@ func getBlockTimeHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.V
 func getBalanceHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error)
 ```
 
-### 3.3 主机缓冲区管理
-
-主机缓冲区用于在主机和合约之间高效传递大型或复杂数据：
-
-```go
-// 全局缓冲区大小
-const HostBufferSize = 2048
-
-// 主机缓冲区变量 - 动态分配
-var hostBufferPtr int32 = 0
-
-// 初始化主机缓冲区
-func initHostBuffer(instance *wasmer.Instance, memory *wasmer.Memory) error {
-    // 1. 分配缓冲区
-    // 2. 清理缓冲区内存
-    // 3. 通知WebAssembly模块缓冲区地址
-}
-```
-
 ## 4. 通信流程
 
 合约代码与主机环境之间的通信遵循以下流程：
@@ -503,7 +480,6 @@ sequenceDiagram
     participant State as 区块链状态
     
     Contract->>VM: 导出初始化函数
-    VM->>Contract: 设置主机缓冲区
     Note over Contract,VM: 初始化阶段
     
     Contract->>VM: 调用宿主函数(FuncID, 参数)
@@ -515,7 +491,7 @@ sequenceDiagram
         VM->>Contract: 返回简单数据类型值
     else 复杂数据传递
         Contract->>VM: 调用获取缓冲区的宿主函数
-        VM->>Contract: 将数据写入主机缓冲区并返回大小
+        VM->>Contract: 将数据写入缓冲区并返回大小
         Contract->>Contract: 从缓冲区读取数据
     end
 ```
@@ -528,9 +504,6 @@ sequenceDiagram
 2. **复杂类型参数**：
    - 序列化为二进制数据
    - 通过内存指针和长度传递
-3. **大型返回值**：
-   - 使用共享的主机缓冲区
-   - 返回值表示数据大小或状态码
 
 ### 4.2 错误处理
 
@@ -551,15 +524,6 @@ WebAssembly 智能合约接口系统实现了多层安全机制：
 - **内存隔离**：合约只能访问自己的内存空间
 - **内存分配控制**：通过导出的分配函数管理内存使用
 
-示例：
-```go
-// 在主机环境中检查内存安全
-if argPtr < 0 || argPtr >= memorySize || argPtr+argLen > memorySize {
-    fmt.Printf("无效的内存访问: 指针=%d, 长度=%d, 内存大小=%d\n", argPtr, argLen, memorySize)
-    return []wasmer.Value{wasmer.NewI64(0)}, fmt.Errorf("无效的内存访问")
-}
-```
-
 ### 5.2 资源控制
 
 - **内存限制**：设置WebAssembly实例可使用的最大内存
@@ -572,7 +536,7 @@ if argPtr < 0 || argPtr >= memorySize || argPtr+argLen > memorySize {
 
 ### 6.1 默认Object特性
 
-- **自动创建**：在合约部署时系统自动创建
+- **自动创建**：每个合约在部署时系统自动创建
 - **通过空ID访问**：虽然有真实的唯一ID，但可以通过空ObjectID（全为0的字节数组）访问
 - **初始所有权**：默认情况下，所有者是合约地址本身
 - **可转移所有权**：与其他对象一样，可以通过SetOwner方法转移所有权
@@ -584,15 +548,10 @@ if argPtr < 0 || argPtr >= memorySize || argPtr+argLen > memorySize {
 
 ```go
 // 获取合约的默认Object
-func getDefaultObject(ctx *Context) Object {
+func getDefaultObject(ctx core.Context) core.Object {
     // 使用空ObjectID获取默认对象
-    emptyID := ObjectID{} // 全为0的ObjectID
-    obj, err := ctx.GetObject(emptyID)
-    if err != nil {
-        // 正常情况下不应发生错误，因为默认Object总是存在
-        panic(fmt.Sprintf("无法获取默认对象: %v", err))
-    }
-    return obj
+    emptyID := core.ObjectID{} // 全为0的ObjectID
+    return ctx.GetObject(emptyID)
 }
 ```
 
@@ -602,13 +561,9 @@ func getDefaultObject(ctx *Context) Object {
 
 ```go
 // 转移默认Object的所有权
-func transferDefaultObjectOwnership(ctx *Context, newOwner Address) bool {
+func transferDefaultObjectOwnership(ctx core.Context, newOwner Address) bool {
     // 获取默认对象
-    defaultObj, err := ctx.GetObject(ObjectID{})
-    if err != nil {
-        ctx.Log("error", "message", "无法获取默认对象")
-        return false
-    }
+    defaultObj := ctx.GetObject(ObjectID{})
     
     // 检查当前调用者是否为所有者
     currentOwner := defaultObj.Owner()
@@ -642,15 +597,9 @@ func transferDefaultObjectOwnership(ctx *Context, newOwner Address) bool {
 
 ```go
 // 初始化合约
-func Initialize(name string, symbol string) int32 {
-    ctx := &Context{}
-    
+func Initialize(ctx core.Context, name string, symbol string) int32 {
     // 获取默认Object
-    defaultObj, err := ctx.GetObject(ObjectID{})
-    if err != nil {
-        ctx.Log("error", "message", "无法获取默认对象")
-        return -1
-    }
+    defaultObj := ctx.GetObject(ObjectID{})
     
     // 存储合约基本信息
     err = defaultObj.Set("name", name)
@@ -670,14 +619,9 @@ func Initialize(name string, symbol string) int32 {
 }
 
 // 获取合约名称
-func GetName() string {
-    ctx := &Context{}
-    
+func GetName(ctx core.Context) string {
     // 获取默认Object
-    defaultObj, err := ctx.GetObject(ObjectID{})
-    if err != nil {
-        return ""
-    }
+    defaultObj := ctx.GetObject(ObjectID{})
     
     // 读取名称
     var name string
@@ -690,27 +634,27 @@ func GetName() string {
 }
 ```
 
-### 6.6 与其他状态管理方式的比较
+### 6.6 状态管理方式的比较
 
-| 状态管理方式 | 优点 | 缺点 |
-|------------|------|------|
-| 默认Object | 自动创建、简单直接、无需额外ID管理 | 所有数据集中在一个对象 |
-| 自定义多对象 | 数据分散存储、更好的组织结构 | 需要管理多个对象ID |
-| 全局变量 | 访问简单、无需序列化 | 状态不持久、每次执行重置 |
+| 状态管理方式 | 优点                               | 缺点                     |
+| ------------ | ---------------------------------- | ------------------------ |
+| 默认Object   | 自动创建、简单直接、无需额外ID管理 | 所有数据集中在一个对象   |
+| 自定义多对象 | 数据分散存储、更好的组织结构       | 需要管理多个对象ID       |
+| 全局变量     | 访问简单、无需序列化               | 状态不持久、每次执行重置 |
 
 默认Object提供了全局变量的便捷性和区块链存储的持久性，是小型合约或简单状态管理的理想选择。
 
-### 6.6 Context使用最佳实践
+### 6.7 Context使用最佳实践
 
 智能合约中的Context对象是连接合约代码与区块链环境的桥梁，它提供了访问区块链状态和功能的标准接口。为了确保合约状态一致性和正确的执行环境，应当遵循以下最佳实践：
 
-#### 6.6.1 Context作为参数传递
+#### 6.7.1 Context作为参数传递
 
 **重要原则**: Context应该作为参数传递给合约函数，而不是在函数内部创建。
 
 ```go
 // ✅ 推荐：Context作为参数传递
-func Transfer(ctx *Context, to Address, amount uint64) bool {
+func Transfer(ctx core.Context, to Address, amount uint64) bool {
     // 使用传入的ctx访问区块链状态
     sender := ctx.Sender()
     // ...其他逻辑
@@ -723,7 +667,7 @@ func Transfer(to Address, amount uint64) bool {
 }
 ```
 
-#### 6.6.2 Context参数传递的好处
+#### 6.7.2 Context参数传递的好处
 
 将Context作为参数传递而非在函数内部创建有以下优势：
 
@@ -733,13 +677,13 @@ func Transfer(to Address, amount uint64) bool {
 4. **依赖注入**：便于测试，可以注入模拟的Context进行单元测试
 5. **执行环境继承**：确保子调用继承父调用的执行环境特性
 
-#### 6.6.3 辅助函数中的Context传递
+#### 6.7.3 辅助函数中的Context传递
 
 在合约内部的辅助函数中，也应当保持Context参数的传递模式：
 
 ```go
 // 公开的合约函数
-func Mint(ctx *Context, to Address, amount uint64) bool {
+func Mint(ctx core.Context, to Address, amount uint64) bool {
     // 验证权限
     if !isAuthorized(ctx, ctx.Sender()) {
         return false
@@ -750,26 +694,43 @@ func Mint(ctx *Context, to Address, amount uint64) bool {
 }
 
 // 内部辅助函数
-func updateBalance(ctx *Context, account Address, amount uint64) bool {
+func updateBalance(ctx core.Context, account Address, amount uint64) bool {
     // 使用传入的Context进行状态访问
     // ...
 }
 ```
 
-#### 6.6.4 跨合约调用中的Context处理
+#### 6.7.4 跨合约调用中的Context处理
 
 在进行跨合约调用时，系统会自动处理Context的传递和调用链信息的维护：
 
 ```go
 // 在合约A中调用合约B
-func CallOtherContract(ctx *Context, targetContract Address) {
+func CallOtherContract(ctx core.Context, targetContract Address) {
     // 调用其他合约时，系统会自动处理Context传递
     result, err := ctx.Call(targetContract, "SomeFunction", arg1, arg2)
     // ...
 }
 
 // 在合约B中被调用的函数
-func SomeFunction(ctx *Context, arg1 string, arg2 uint64) {
+func SomeFunction(ctx core.Context, arg1 string, arg2 uint64) {
+    // ctx中包含了调用者信息
+    caller := ctx.Sender() // 返回合约A的地址
+    // ...
+}
+```
+
+```go
+import "github.com/.../contractB"
+// 在合约A中直接调用合约B
+func CallOtherContract(ctx core.Context, targetContract Address) {
+    // 调用其他合约时，系统会自动处理Context传递
+    contractB.SomeFunction(arg1, arg2)
+    // ...
+}
+
+// 在合约B中被调用的函数
+func SomeFunction(ctx core.Context, arg1 string, arg2 uint64) {
     // ctx中包含了调用者信息
     caller := ctx.Sender() // 返回合约A的地址
     // ...
@@ -782,15 +743,14 @@ func SomeFunction(ctx *Context, arg1 string, arg2 uint64) {
 
 WebAssembly智能合约接口系统提供以下几类系统调用：
 
-| 功能类别 | 描述 | 示例函数 |
-|---------|------|---------|
-| 上下文信息 | 获取区块链环境信息 | GetSender, GetBlockHeight, GetBlockTime |
-| 账户操作 | 管理账户余额和转账 | GetBalance, Transfer |
-| 对象管理 | 创建和管理状态对象 | CreateObject, GetObject, DeleteObject |
-| 存储操作 | 读写持久化存储 | DbRead, DbWrite, DbDelete |
-| 合约调用 | 调用其他合约 | Call |
-| 日志与事件 | 记录合约执行事件 | Log |
-| 内存管理 | 管理WebAssembly内存 | allocate, deallocate |
+| 功能类别   | 描述                | 示例函数                                |
+| ---------- | ------------------- | --------------------------------------- |
+| 上下文信息 | 获取区块链环境信息  | GetSender, GetBlockHeight, GetBlockTime |
+| 账户操作   | 管理账户余额和转账  | GetBalance, Transfer                    |
+| 对象管理   | 创建和管理状态对象  | CreateObject, GetObject, DeleteObject   |
+| 合约调用   | 调用其他合约        | Call                                    |
+| 日志与事件 | 记录合约执行事件    | Log                                     |
+| 内存管理   | 管理WebAssembly内存 | allocate, deallocate                    |
 
 ## 8. 优化技术
 
@@ -814,8 +774,7 @@ WebAssembly智能合约接口系统提供以下几类系统调用：
 5. **错误处理**：妥善处理所有错误情况，不假设调用总是成功
 6. **资源限制**：设置合理的内存和执行时间限制
 7. **重用缓冲区**：为减少内存压力，合约代码应尽量重用缓冲区而非频繁分配内存
-8. **正确导出函数**：使用 `//export` 标记所有需要导出的函数
-9. **类型安全序列化**：使用带类型信息的序列化方法，避免数值类型转换问题
+8. **类型安全序列化**：使用带类型信息的序列化方法，避免数值类型转换问题
 
 ## 10. 总结
 
