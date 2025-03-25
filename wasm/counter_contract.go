@@ -120,38 +120,16 @@ func Reset(ctx *Context) {
 // 初始化计数器函数
 func handleInitialize(ctx *Context, params []byte) (interface{}, error) {
 	fmt.Println("handleInitialize")
-	// 解析参数
-	var initParams struct {
-		InitialValue int64 `json:"initial_value"`
-	}
 
-	if len(params) > 0 {
-		if err := json.Unmarshal(params, &initParams); err != nil {
-			return nil, fmt.Errorf("invalid initialize parameters: %w", err)
-		}
-	} else {
-		// 默认初始值为0
-		initParams.InitialValue = 0
-	}
-
-	// 获取或创建存储计数器的对象
-	obj, err := getOrCreateCounterObject(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get counter object: %w", err)
-	}
-
-	// 设置初始值
-	if err := obj.Set(CounterKey, initParams.InitialValue); err != nil {
-		return nil, fmt.Errorf("failed to set initial counter value: %w", err)
-	}
+	out := Initialize(ctx)
 
 	// 记录初始化事件
-	ctx.Log("CounterInitialized", "value", initParams.InitialValue)
+	ctx.Log("CounterInitialized", "value", out)
 
 	// 返回成功结果
 	return map[string]interface{}{
 		"status": "success",
-		"value":  initParams.InitialValue,
+		"value":  out,
 	}, nil
 }
 
@@ -171,36 +149,15 @@ func handleIncrement(ctx *Context, params []byte) (interface{}, error) {
 		incrParams.Amount = 1
 	}
 
-	// 获取计数器对象
-	obj, err := getOrCreateCounterObject(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get counter object: %w", err)
-	}
-
-	// 获取当前值
-	var currentValue int64
-	if err := obj.Get(CounterKey, &currentValue); err != nil {
-		// 如果未找到值，初始化为0
-		currentValue = 0
-	}
-
-	// 计算新值
-	newValue := currentValue + incrParams.Amount
-
-	// 保存新值
-	if err := obj.Set(CounterKey, newValue); err != nil {
-		return nil, fmt.Errorf("failed to update counter value: %w", err)
-	}
-
+	newValue := Increment(ctx, uint64(incrParams.Amount))
 	// 记录增加事件
 	ctx.Log("CounterIncremented", "amount", incrParams.Amount, "new_value", newValue)
 
 	// 返回成功结果
 	return map[string]interface{}{
-		"status":         "success",
-		"previous_value": currentValue,
-		"amount":         incrParams.Amount,
-		"new_value":      newValue,
+		"status":    "success",
+		"amount":    incrParams.Amount,
+		"new_value": newValue,
 	}, nil
 }
 
