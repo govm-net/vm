@@ -37,6 +37,7 @@ type Context interface {
 type Object interface {
 	ID() ObjectID          // 获取对象ID
 	Owner() Address        // 获取对象所有者
+	Contract() Address     // 获取对象所属合约
 	SetOwner(addr Address) // 设置对象所有者，失败时panic
 
 	// 字段操作

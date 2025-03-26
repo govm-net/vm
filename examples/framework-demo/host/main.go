@@ -13,10 +13,7 @@ import (
 // 函数ID常量定义 - 从types包导入以确保一致性
 const (
 	FuncGetSender          = int32(types.FuncGetSender)
-	FuncGetBlockHeight     = int32(types.FuncGetBlockHeight)
-	FuncGetBlockTime       = int32(types.FuncGetBlockTime)
 	FuncGetContractAddress = int32(types.FuncGetContractAddress)
-	FuncGetBalance         = int32(types.FuncGetBalance)
 	FuncTransfer           = int32(types.FuncTransfer)
 	FuncCreateObject       = int32(types.FuncCreateObject)
 	FuncCall               = int32(types.FuncCall)
@@ -26,10 +23,6 @@ const (
 	FuncLog                = int32(types.FuncLog)
 	FuncGetObjectOwner     = int32(types.FuncGetObjectOwner)
 	FuncSetObjectOwner     = int32(types.FuncSetObjectOwner)
-	FuncDbRead             = int32(types.FuncDbRead)
-	FuncDbWrite            = int32(types.FuncDbWrite)
-	FuncDbDelete           = int32(types.FuncDbDelete)
-	FuncSetHostBuffer      = int32(types.FuncSetHostBuffer)
 )
 
 // 全局缓冲区大小
@@ -139,29 +132,6 @@ func callHostSetHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Va
 		case FuncSetObjectOwner: // 设置对象所有者
 			// 实现设置对象所有者的逻辑...
 			return []wasmer.Value{wasmer.NewI64(1)}, nil
-
-		case FuncDbWrite: // 写入数据库
-			// 实现数据库写入的逻辑...
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
-
-		case FuncDbDelete: // 删除数据库条目
-			// 实现数据库删除的逻辑...
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
-
-		case FuncGetBlockHeight: // 获取当前区块高度 - 简单返回值，不需要缓冲区
-			return []wasmer.Value{wasmer.NewI64(int64(state.CurrentBlock))}, nil
-
-		case FuncGetBlockTime: // 获取当前区块时间 - 简单返回值，不需要缓冲区
-			return []wasmer.Value{wasmer.NewI64(state.CurrentTime)}, nil
-
-		case FuncGetBalance: // 获取余额 - 简单返回值，不需要缓冲区
-			if argLen != 20 {
-				return []wasmer.Value{wasmer.NewI64(0)}, nil
-			}
-			var addr Address
-			copy(addr[:], argData)
-			balance := state.Balances[addr]
-			return []wasmer.Value{wasmer.NewI64(int64(balance))}, nil
 
 		default:
 			fmt.Printf("未知的Set函数ID: %d\n", funcID)
@@ -295,12 +265,6 @@ func callHostGetBufferHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]was
 			// 获取对象所有者并写入全局缓冲区
 			owner := state.Objects[objID].Owner
 			dataSize := copy(hostBuffer, owner[:])
-			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
-
-		case FuncDbRead: // 读取数据库
-			// 实现数据库读取逻辑并将结果写入全局缓冲区
-			result := []byte("模拟数据库读取结果")
-			dataSize := copy(hostBuffer, result)
 			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
 
 		default:

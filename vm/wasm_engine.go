@@ -2,14 +2,16 @@
 package vm
 
 import (
+	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/types"
 	"github.com/wasmerio/wasmer-go/wasmer"
 )
 
@@ -26,6 +28,20 @@ type WasmEngine struct {
 	memoryLimit        uint64
 	executionTimeLimit uint64
 	instructionsLimit  uint64
+
+	// 全局状态
+	state *HostState
+}
+
+// HostState 存储全局状态
+type HostState struct {
+	CurrentSender   core.Address
+	CurrentBlock    uint64
+	CurrentTime     int64
+	ContractAddress core.Address
+	Balances        map[core.Address]uint64
+	Objects         map[core.ObjectID]core.Object
+	ObjectsByOwner  map[core.Address][]core.ObjectID
 }
 
 // WasmConfig 包含WebAssembly引擎的配置选项
@@ -56,6 +72,11 @@ func NewWasmEngine(config *WasmConfig) (*WasmEngine, error) {
 		memoryLimit:        config.MemoryLimit,
 		executionTimeLimit: config.ExecutionTimeLimit,
 		instructionsLimit:  config.InstructionsLimit,
+		state: &HostState{
+			Balances:       make(map[core.Address]uint64),
+			Objects:        make(map[core.ObjectID]core.Object),
+			ObjectsByOwner: make(map[core.Address][]core.ObjectID),
+		},
 	}
 
 	return engine, nil
@@ -63,13 +84,11 @@ func NewWasmEngine(config *WasmConfig) (*WasmEngine, error) {
 
 // DeployWasmContract 部署新的WebAssembly合约
 func (e *WasmEngine) DeployWasmContract(wasmCode []byte, sender core.Address) (core.Address, error) {
-	// 验证WASM代码
 	if len(wasmCode) == 0 {
 		var zero core.Address
 		return zero, errors.New("合约代码不能为空")
 	}
 
-	// 编译检查WASM模块
 	engine := wasmer.NewEngine()
 	store := wasmer.NewStore(engine)
 	_, err := wasmer.NewModule(store, wasmCode)
@@ -78,17 +97,14 @@ func (e *WasmEngine) DeployWasmContract(wasmCode []byte, sender core.Address) (c
 		return zero, fmt.Errorf("无效的WebAssembly模块: %w", err)
 	}
 
-	// 生成合约地址
 	contractAddr := wasmGenerateContractAddress(wasmCode, sender)
-
-	// 存储合约代码到文件
 	contractPath := filepath.Join(e.contractDir, fmt.Sprintf("%x", contractAddr)+".wasm")
-	if err := ioutil.WriteFile(contractPath, wasmCode, 0644); err != nil {
+
+	if err := os.WriteFile(contractPath, wasmCode, 0644); err != nil {
 		var zero core.Address
 		return zero, fmt.Errorf("存储合约代码失败: %w", err)
 	}
 
-	// 添加到合约映射
 	e.contractsLock.Lock()
 	e.contracts[contractAddr] = contractPath
 	e.contractsLock.Unlock()
@@ -98,7 +114,6 @@ func (e *WasmEngine) DeployWasmContract(wasmCode []byte, sender core.Address) (c
 
 // LoadWasmModule 加载WebAssembly模块
 func (e *WasmEngine) LoadWasmModule(contractAddr core.Address) ([]byte, error) {
-	// 检查合约是否存在
 	e.contractsLock.RLock()
 	contractPath, exists := e.contracts[contractAddr]
 	e.contractsLock.RUnlock()
@@ -107,8 +122,7 @@ func (e *WasmEngine) LoadWasmModule(contractAddr core.Address) ([]byte, error) {
 		return nil, fmt.Errorf("合约不存在: %x", contractAddr)
 	}
 
-	// 加载合约代码
-	wasmCode, err := ioutil.ReadFile(contractPath)
+	wasmCode, err := os.ReadFile(contractPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取合约代码失败: %w", err)
 	}
@@ -116,20 +130,84 @@ func (e *WasmEngine) LoadWasmModule(contractAddr core.Address) ([]byte, error) {
 	return wasmCode, nil
 }
 
-// CreateWasmInstance 创建WebAssembly实例
-func (e *WasmEngine) CreateWasmInstance(wasmCode []byte, imports *wasmer.ImportObject) (*wasmer.Instance, error) {
+// CreateWasmInstanceWithImports 创建WebAssembly实例并设置导入对象
+func (e *WasmEngine) CreateWasmInstanceWithImports(ctx context.Context, wasmCode []byte) (*wasmer.Instance, error) {
 	// 创建WASM引擎和存储
 	engine := wasmer.NewEngine()
 	store := wasmer.NewStore(engine)
 
-	// 编译模块
+	// 编译WebAssembly模块
 	module, err := wasmer.NewModule(store, wasmCode)
 	if err != nil {
 		return nil, fmt.Errorf("编译WebAssembly模块失败: %w", err)
 	}
 
-	// 实例化模块
-	instance, err := wasmer.NewInstance(module, imports)
+	// 创建导入对象
+	importObject := wasmer.NewImportObject()
+
+	// 创建内存实例
+	limits, err := wasmer.NewLimits(16, 128)
+	if err != nil {
+		return nil, fmt.Errorf("创建内存限制失败: %w", err)
+	}
+	memoryType := wasmer.NewMemoryType(limits)
+	memory := wasmer.NewMemory(store, memoryType)
+	if memory == nil {
+		return nil, fmt.Errorf("创建内存失败")
+	}
+
+	// 创建环境函数
+	envFunctions := map[string]wasmer.IntoExtern{
+		"memory": memory,
+		"call_host_set": wasmer.NewFunction(
+			store,
+			wasmer.NewFunctionType(
+				[]*wasmer.ValueType{
+					wasmer.NewValueType(wasmer.I32), // funcID
+					wasmer.NewValueType(wasmer.I32), // argPtr
+					wasmer.NewValueType(wasmer.I32), // argLen
+					wasmer.NewValueType(wasmer.I32), // bufferPtr
+				},
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)},
+			),
+			e.callHostSetHandler(ctx),
+		),
+		"call_host_get_buffer": wasmer.NewFunction(
+			store,
+			wasmer.NewFunctionType(
+				[]*wasmer.ValueType{
+					wasmer.NewValueType(wasmer.I32), // funcID
+					wasmer.NewValueType(wasmer.I32), // argPtr
+					wasmer.NewValueType(wasmer.I32), // argLen
+					wasmer.NewValueType(wasmer.I32), // buffer
+				},
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)},
+			),
+			e.callHostGetBufferHandler(ctx),
+		),
+		"get_block_height": wasmer.NewFunction(
+			store,
+			wasmer.NewFunctionType(
+				[]*wasmer.ValueType{},
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)},
+			),
+			e.getBlockHeightHandler(ctx),
+		),
+		"get_block_time": wasmer.NewFunction(
+			store,
+			wasmer.NewFunctionType(
+				[]*wasmer.ValueType{},
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)},
+			),
+			e.getBlockTimeHandler(ctx),
+		),
+	}
+
+	// 注册环境命名空间
+	importObject.Register("env", envFunctions)
+
+	// 创建实例
+	instance, err := wasmer.NewInstance(module, importObject)
 	if err != nil {
 		return nil, fmt.Errorf("实例化WebAssembly模块失败: %w", err)
 	}
@@ -137,131 +215,176 @@ func (e *WasmEngine) CreateWasmInstance(wasmCode []byte, imports *wasmer.ImportO
 	return instance, nil
 }
 
-// CreateImportObject 创建导入对象，为WebAssembly提供宿主函数
-func (e *WasmEngine) CreateImportObject(ctx *ExecutionContext) (*wasmer.ImportObject, error) {
-	// 创建WASM引擎和存储
-	engine := wasmer.NewEngine()
-	store := wasmer.NewStore(engine)
+// callHostSetHandler 处理修改区块链状态的宿主函数调用
+func (e *WasmEngine) callHostSetHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+	return func(args []wasmer.Value) ([]wasmer.Value, error) {
+		if len(args) != 4 {
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
+		}
 
-	// 创建导入对象
-	importObject := wasmer.NewImportObject()
+		funcID := args[0].I32()
+		_ = args[1].I32() // argPtr 暂时未使用
+		_ = args[2].I32() // argLen 暂时未使用
+		_ = args[3].I32() // bufferPtr 暂时未使用
 
-	// 创建环境函数
-	envFunctions := make(map[string]wasmer.IntoExtern)
+		// 根据函数ID执行不同的操作
+		switch funcID {
+		case int32(types.FuncTransfer):
+			// TODO: 实现转账逻辑
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
-	// 添加基本环境函数
-	envFunctions["get_block_height"] = wasmer.NewFunction(
-		store,
-		wasmer.NewFunctionType(wasmer.NewValueTypes(), wasmer.NewValueTypes(wasmer.I64)),
-		func(args []wasmer.Value) ([]wasmer.Value, error) {
-			return []wasmer.Value{wasmer.NewI64(int64(ctx.BlockHeight()))}, nil
-		},
-	)
+		case int32(types.FuncLog):
+			// TODO: 实现日志记录逻辑
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
-	envFunctions["get_block_time"] = wasmer.NewFunction(
-		store,
-		wasmer.NewFunctionType(wasmer.NewValueTypes(), wasmer.NewValueTypes(wasmer.I64)),
-		func(args []wasmer.Value) ([]wasmer.Value, error) {
-			return []wasmer.Value{wasmer.NewI64(ctx.BlockTime())}, nil
-		},
-	)
-
-	// 创建统一的宿主函数调用处理器
-	envFunctions["call_host_set"] = wasmer.NewFunction(
-		store,
-		wasmer.NewFunctionType(
-			wasmer.NewValueTypes(wasmer.I32, wasmer.I32, wasmer.I32),
-			wasmer.NewValueTypes(wasmer.I64),
-		),
-		func(args []wasmer.Value) ([]wasmer.Value, error) {
-			// 提取参数
-			funcID := args[0].I32()
-			argPtr := args[1].I32()
-			argLen := args[2].I32()
-
-			// 处理宿主函数调用
-			result := e.handleHostSetFunction(ctx, funcID, argPtr, argLen)
-			return []wasmer.Value{wasmer.NewI64(result)}, nil
-		},
-	)
-
-	envFunctions["call_host_get_buffer"] = wasmer.NewFunction(
-		store,
-		wasmer.NewFunctionType(
-			wasmer.NewValueTypes(wasmer.I32, wasmer.I32, wasmer.I32),
-			wasmer.NewValueTypes(wasmer.I32),
-		),
-		func(args []wasmer.Value) ([]wasmer.Value, error) {
-			// 提取参数
-			funcID := args[0].I32()
-			argPtr := args[1].I32()
-			argLen := args[2].I32()
-
-			// 处理宿主函数调用
-			result := e.handleHostGetBufferFunction(ctx, funcID, argPtr, argLen)
-			return []wasmer.Value{wasmer.NewI32(result)}, nil
-		},
-	)
-
-	// 添加更多环境函数...
-
-	// 注册环境命名空间
-	importObject.Register("env", envFunctions)
-
-	return importObject, nil
-}
-
-// handleHostSetFunction 处理修改区块链状态的宿主函数调用
-func (e *WasmEngine) handleHostSetFunction(ctx *ExecutionContext, funcID int32, argPtr int32, argLen int32) int64 {
-	// 根据函数ID执行相应操作
-	switch funcID {
-	// 根据函数ID进行不同的处理...
-	default:
-		return 0 // 未知函数ID
+		default:
+			return []wasmer.Value{wasmer.NewI32(-1)}, nil
+		}
 	}
 }
 
-// handleHostGetBufferFunction 处理获取区块链状态的宿主函数调用
-func (e *WasmEngine) handleHostGetBufferFunction(ctx *ExecutionContext, funcID int32, argPtr int32, argLen int32) int32 {
-	// 根据函数ID执行相应操作
-	switch funcID {
-	// 根据函数ID进行不同的处理...
-	default:
-		return 0 // 未知函数ID
+// callHostGetBufferHandler 处理获取区块链状态的宿主函数调用
+func (e *WasmEngine) callHostGetBufferHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+	return func(args []wasmer.Value) ([]wasmer.Value, error) {
+		if len(args) != 4 {
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
+		}
+
+		funcID := args[0].I32()
+		_ = args[1].I32() // argPtr 暂时未使用
+		_ = args[2].I32() // argLen 暂时未使用
+		bufferPtr := args[3].I32()
+
+		memory, ok := ctx.Value("memory").(*wasmer.Memory)
+		if !ok || memory == nil {
+			return []wasmer.Value{wasmer.NewI32(0)}, fmt.Errorf("内存实例为空")
+		}
+
+		memorySize := int32(len(memory.Data()))
+		if bufferPtr < 0 || bufferPtr >= memorySize || bufferPtr+types.HostBufferSize > memorySize {
+			return []wasmer.Value{wasmer.NewI32(0)}, fmt.Errorf("无效的缓冲区位置")
+		}
+
+		hostBuffer := memory.Data()[bufferPtr : bufferPtr+types.HostBufferSize]
+
+		switch funcID {
+		case int32(types.FuncGetSender):
+			data := e.state.CurrentSender[:]
+			dataSize := copy(hostBuffer, data)
+			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
+
+		case int32(types.FuncGetContractAddress):
+			data := e.state.ContractAddress[:]
+			dataSize := copy(hostBuffer, data)
+			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
+
+		default:
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
+		}
+	}
+}
+
+// getBlockHeightHandler 获取区块高度处理函数
+func (e *WasmEngine) getBlockHeightHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+	return func(args []wasmer.Value) ([]wasmer.Value, error) {
+		return []wasmer.Value{wasmer.NewI64(int64(e.state.CurrentBlock))}, nil
+	}
+}
+
+// getBlockTimeHandler 获取区块时间处理函数
+func (e *WasmEngine) getBlockTimeHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+	return func(args []wasmer.Value) ([]wasmer.Value, error) {
+		return []wasmer.Value{wasmer.NewI64(e.state.CurrentTime)}, nil
 	}
 }
 
 // CallWasmFunction 调用WebAssembly函数
-func (e *WasmEngine) CallWasmFunction(instance *wasmer.Instance, functionName string, args ...interface{}) (interface{}, error) {
-	// 获取导出函数
-	fn, err := instance.Exports.GetFunction(functionName)
+func (e *WasmEngine) CallWasmFunction(ctx context.Context, instance *wasmer.Instance, functionName string, params []byte) (int32, error) {
+	// 检查上下文是否已取消
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("上下文已取消: %w", err)
+	}
+
+	// 获取入口函数
+	handleFn, err := instance.Exports.GetFunction("handle_contract_call")
 	if err != nil {
-		return nil, fmt.Errorf("获取函数失败: %s: %w", functionName, err)
+		return 0, fmt.Errorf("获取入口函数失败: %w", err)
 	}
 
-	// 转换参数
-	wasmArgs := make([]interface{}, len(args))
-	for i, arg := range args {
-		wasmArgs[i] = arg
+	// 获取内存实例
+	memory, ok := ctx.Value("memory").(*wasmer.Memory)
+	if !ok || memory == nil {
+		return 0, fmt.Errorf("内存实例为空")
 	}
 
-	// 调用函数
-	result, err := fn(wasmArgs...)
+	// 获取allocate函数
+	allocateFn, err := instance.Exports.GetFunction("allocate")
 	if err != nil {
-		return nil, fmt.Errorf("调用函数失败: %s: %w", functionName, err)
+		return 0, fmt.Errorf("获取allocate函数失败: %w", err)
 	}
 
-	return result, nil
+	// 写入函数名到WASM内存
+	var fnNamePtr int32
+	if len(functionName) > 0 {
+		// 申请内存
+		result, err := allocateFn(int32(len(functionName)))
+		if err != nil {
+			return 0, fmt.Errorf("申请函数名内存失败: %w", err)
+		}
+		fnNamePtr = result.(int32)
+
+		// 写入数据
+		memorySize := len(memory.Data())
+		if fnNamePtr < 0 || fnNamePtr >= int32(memorySize) || fnNamePtr+int32(len(functionName)) > int32(memorySize) {
+			return 0, fmt.Errorf("无效的内存位置")
+		}
+		copy(memory.Data()[fnNamePtr:], []byte(functionName))
+	}
+
+	// 写入参数到WASM内存
+	var paramPtr int32
+	if len(params) > 0 {
+		// 申请内存
+		result, err := allocateFn(int32(len(params)))
+		if err != nil {
+			return 0, fmt.Errorf("申请参数内存失败: %w", err)
+		}
+		paramPtr = result.(int32)
+
+		// 写入数据
+		memorySize := len(memory.Data())
+		if paramPtr < 0 || paramPtr >= int32(memorySize) || paramPtr+int32(len(params)) > int32(memorySize) {
+			return 0, fmt.Errorf("无效的内存位置")
+		}
+		copy(memory.Data()[paramPtr:], params)
+	}
+
+	// 调用入口函数
+	result, err := handleFn(fnNamePtr, int32(len(functionName)), paramPtr, int32(len(params)))
+	if err != nil {
+		return 0, fmt.Errorf("调用入口函数失败: %w", err)
+	}
+
+	// 转换结果为int32
+	if result == nil {
+		return 0, nil
+	}
+
+	switch v := result.(type) {
+	case int32:
+		return v, nil
+	case int64:
+		return int32(v), nil
+	default:
+		return 0, fmt.Errorf("不支持的返回值类型: %T", v)
+	}
 }
 
 // 生成合约地址
-func wasmGenerateContractAddress(code []byte, sender core.Address) core.Address {
-	// 简单实现，实际应使用哈希算法
+func wasmGenerateContractAddress(code []byte, _ core.Address) core.Address {
+	codeHash := sha256.Sum256(code)
+
 	var addr core.Address
-
-	// 使用code的前10字节和sender的前10字节组合
-	copy(addr[:10], code[:10])
-	copy(addr[10:], sender[:10])
-
+	copy(addr[:], codeHash[:])
 	return addr
 }

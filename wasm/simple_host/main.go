@@ -14,10 +14,7 @@ import (
 // 函数ID常量定义 - 从types包导入以确保一致性
 const (
 	FuncGetSender          = int32(types.FuncGetSender)
-	FuncGetBlockHeight     = int32(types.FuncGetBlockHeight)
-	FuncGetBlockTime       = int32(types.FuncGetBlockTime)
 	FuncGetContractAddress = int32(types.FuncGetContractAddress)
-	FuncGetBalance         = int32(types.FuncGetBalance)
 	FuncTransfer           = int32(types.FuncTransfer)
 	FuncCreateObject       = int32(types.FuncCreateObject)
 	FuncCall               = int32(types.FuncCall)
@@ -29,10 +26,6 @@ const (
 	FuncSetObjectOwner     = int32(types.FuncSetObjectOwner)
 	FuncGetObjectField     = int32(types.FuncGetObjectField)
 	FuncSetObjectField     = int32(types.FuncSetObjectField)
-	FuncDbRead             = int32(types.FuncDbRead)
-	FuncDbWrite            = int32(types.FuncDbWrite)
-	FuncDbDelete           = int32(types.FuncDbDelete)
-	FuncSetHostBuffer      = int32(types.FuncSetHostBuffer)
 )
 
 // 全局缓冲区大小
@@ -72,7 +65,7 @@ var state = &HostState{
 // 合并所有宿主函数到统一的调用处理器 - 用于设置数据的函数
 func callHostSetHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
-		if len(args) != 3 {
+		if len(args) != 4 {
 			fmt.Println("参数数量不正确")
 			return []wasmer.Value{wasmer.NewI64(0)}, nil
 		}
@@ -80,7 +73,6 @@ func callHostSetHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Va
 		funcID := args[0].I32()
 		argPtr := args[1].I32()
 		argLen := args[2].I32()
-
 		fmt.Printf("调用宿主Set函数 ID=%d, 参数指针=%d, 参数长度=%d\n", funcID, argPtr, argLen)
 
 		// 读取参数数据，添加安全检查
@@ -127,51 +119,29 @@ func callHostSetHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Va
 			// 执行转账
 			state.Balances[state.ContractAddress] -= amount
 			state.Balances[to] += amount
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		case FuncDeleteObject: // 删除对象
 			// 实现删除对象的逻辑...
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		case FuncLog: // 记录日志
 			// 实现日志记录的逻辑...
 			fmt.Printf("[WASM]日志: len:%d %s\n", len(argData), string(argData))
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		case FuncSetObjectOwner: // 设置对象所有者
 			// 实现设置对象所有者的逻辑...
-			return []wasmer.Value{wasmer.NewI64(0)}, nil
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		case FuncSetObjectField: // 设置对象字段
 			// 实现设置对象字段的逻辑...
 			fmt.Printf("[HOST] SetObjectField: %s\n", string(argData))
-			return []wasmer.Value{wasmer.NewI64(123)}, nil
-		case FuncDbWrite: // 写入数据库
-			// 实现数据库写入的逻辑...
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
-
-		case FuncDbDelete: // 删除数据库条目
-			// 实现数据库删除的逻辑...
-			return []wasmer.Value{wasmer.NewI64(1)}, nil
-
-		case FuncGetBlockHeight: // 获取当前区块高度 - 简单返回值，不需要缓冲区
-			return []wasmer.Value{wasmer.NewI64(int64(state.CurrentBlock))}, nil
-
-		case FuncGetBlockTime: // 获取当前区块时间 - 简单返回值，不需要缓冲区
-			return []wasmer.Value{wasmer.NewI64(state.CurrentTime)}, nil
-
-		case FuncGetBalance: // 获取余额 - 简单返回值，不需要缓冲区
-			if argLen != 20 {
-				return []wasmer.Value{wasmer.NewI64(0)}, nil
-			}
-			var addr Address
-			copy(addr[:], argData)
-			balance := state.Balances[addr]
-			return []wasmer.Value{wasmer.NewI64(int64(balance))}, nil
+			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		default:
 			fmt.Printf("未知的Set函数ID: %d\n", funcID)
-			return []wasmer.Value{wasmer.NewI64(0)}, nil
+			return []wasmer.Value{wasmer.NewI32(-1)}, nil
 		}
 	}
 }
@@ -298,12 +268,6 @@ func callHostGetBufferHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]was
 			dataSize := copy(hostBuffer, owner[:])
 			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
 
-		case FuncDbRead: // 读取数据库
-			// 实现数据库读取逻辑并将结果写入全局缓冲区
-			result := []byte("模拟数据库读取结果")
-			dataSize := copy(hostBuffer, result)
-			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
-
 		default:
 			fmt.Printf("未知的GetBuffer函数ID: %d\n", funcID)
 			return []wasmer.Value{wasmer.NewI32(0)}, nil
@@ -425,8 +389,9 @@ func main() {
 					wasmer.NewValueType(wasmer.I32), // funcID
 					wasmer.NewValueType(wasmer.I32), // argPtr
 					wasmer.NewValueType(wasmer.I32), // argLen
+					wasmer.NewValueType(wasmer.I32), // bufferPtr
 				},
-				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)}, // 结果编码为int64
+				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)}, // 结果编码为int32
 			),
 			callHostSetHandler(memory),
 		),

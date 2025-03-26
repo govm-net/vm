@@ -15,10 +15,7 @@ import (
 // 导入函数ID常量 - 从types包导入以确保一致性
 const (
 	FuncGetSender          = int32(types.FuncGetSender)
-	FuncGetBlockHeight     = int32(types.FuncGetBlockHeight)
-	FuncGetBlockTime       = int32(types.FuncGetBlockTime)
 	FuncGetContractAddress = int32(types.FuncGetContractAddress)
-	FuncGetBalance         = int32(types.FuncGetBalance)
 	FuncTransfer           = int32(types.FuncTransfer)
 	FuncCreateObject       = int32(types.FuncCreateObject)
 	FuncCall               = int32(types.FuncCall)
@@ -30,10 +27,7 @@ const (
 	FuncSetObjectOwner     = int32(types.FuncSetObjectOwner)
 	FuncGetObjectField     = int32(types.FuncGetObjectField)
 	FuncSetObjectField     = int32(types.FuncSetObjectField)
-	FuncDbRead             = int32(types.FuncDbRead)
-	FuncDbWrite            = int32(types.FuncDbWrite)
-	FuncDbDelete           = int32(types.FuncDbDelete)
-	FuncSetHostBuffer      = int32(types.FuncSetHostBuffer)
+	FuncGetObjectContract  = int32(types.FuncGetObjectContract)
 )
 
 // 定义全局接收数据缓冲区的大小
@@ -75,7 +69,7 @@ func init() {
 
 //go:wasmimport env call_host_set
 //export call_host_set
-func call_host_set(funcID, argPtr, argLen int32) int64
+func call_host_set(funcID, argPtr, argLen, bufferPtr int32) int32
 
 //go:wasmimport env call_host_get_buffer
 //export call_host_get_buffer
@@ -117,7 +111,7 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 	// 需要通过缓冲区返回复杂数据的函数
 	case FuncGetSender, FuncGetContractAddress, FuncCall,
 		FuncGetObject, FuncGetObjectWithOwner, FuncCreateObject,
-		FuncGetObjectOwner, FuncGetObjectField, FuncDbRead:
+		FuncGetObjectOwner, FuncGetObjectField:
 
 		// 使用获取缓冲区数据的宿主函数（返回数据大小）
 		resultSize = call_host_get_buffer(funcID, argPtr, argLen, hostBufferPtr)
@@ -125,22 +119,21 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 			// 数据已存储在全局缓冲区
 			resultPtr = hostBufferPtr
 			errCode = 0
-		} else {
+		} else if resultSize == 0 {
 			errCode = -1
+		} else {
+			errCode = resultSize
 		}
 
 	// 不需要返回数据的函数或返回简单值的函数
 	default:
 		// 使用设置数据的宿主函数
-		value := call_host_set(funcID, argPtr, argLen)
-		resultSize = int32(value & 0xFFFFFFFF)
-		resultPtr = int32(value >> 32)
-		if resultSize > 0 {
+		resultSize = call_host_set(funcID, argPtr, argLen, hostBufferPtr)
+		if resultSize >= 0 {
+			resultPtr = hostBufferPtr
 			errCode = 0
-		} else if resultPtr > 0 {
-			errCode = resultPtr
 		} else {
-			errCode = -1
+			errCode = resultSize
 		}
 	}
 
@@ -262,15 +255,10 @@ func (c *Context) Balance(addr Address) uint64 {
 	return get_balance(int32(uintptr(unsafe.Pointer(&addr[0]))))
 }
 
-type TransferRequest struct {
-	To     Address
-	Amount uint64
-}
-
 // Transfer 从合约转账到指定地址
 func (c *Context) Transfer(to Address, amount uint64) error {
-	// 创建参数：20字节地址 + 8字节金额
-	data := TransferRequest{
+	data := types.TransferParams{
+		From:   c.ContractAddress(),
 		To:     to,
 		Amount: amount,
 	}
@@ -288,24 +276,14 @@ func (c *Context) Transfer(to Address, amount uint64) error {
 	return nil
 }
 
-type CallRequest struct {
-	Contract Address
-	Function string
-	Args     []any
-	Caller   Address
-}
-
 // Call 调用另一个合约的函数
 func (c *Context) Call(contract Address, function string, args ...interface{}) ([]byte, error) {
-	// 记录跨合约调用信息 - 使用mock模块管理调用链
-	callerAddr := c.ContractAddress()
-
 	// 构造调用参数
-	callData := CallRequest{
+	callData := types.CallParams{
 		Contract: contract,
 		Function: function,
 		Args:     args,
-		Caller:   callerAddr, // 当前合约作为调用者
+		Caller:   c.ContractAddress(), // 当前合约作为调用者
 	}
 
 	// 序列化调用参数
@@ -326,8 +304,9 @@ func (c *Context) Call(contract Address, function string, args ...interface{}) (
 
 // CreateObject 创建一个新的状态对象
 func (c *Context) CreateObject() core.Object {
+	address := c.ContractAddress()
 	// 调用宿主函数，创建对象并获取对象ID
-	ptr, size, errCode := callHost(FuncCreateObject, nil)
+	ptr, size, errCode := callHost(FuncCreateObject, address[:])
 	if errCode != 0 {
 		panic(fmt.Sprintf("failed to create object with code: %d", errCode))
 	}
@@ -341,14 +320,9 @@ func (c *Context) CreateObject() core.Object {
 	return &Object{id: id}
 }
 
-type GetObjectRequest struct {
-	Contract Address
-	ID       ObjectID
-}
-
 // GetObject 获取指定ID的状态对象
 func (c *Context) GetObject(id ObjectID) (core.Object, error) {
-	var request GetObjectRequest
+	var request types.GetObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
 
@@ -372,14 +346,9 @@ func (c *Context) GetObject(id ObjectID) (core.Object, error) {
 	return &Object{id: id}, nil
 }
 
-type GetObjectWithOwnerRequest struct {
-	Contract Address
-	Owner    Address
-}
-
 // GetObjectWithOwner 获取指定所有者的状态对象
 func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
-	var request GetObjectWithOwnerRequest
+	var request types.GetObjectWithOwnerParams
 	request.Contract = c.ContractAddress()
 	request.Owner = owner
 
@@ -407,14 +376,9 @@ func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
 	return &Object{id: id}, nil
 }
 
-type DeleteObjectRequest struct {
-	Contract Address
-	ID       ObjectID
-}
-
 // DeleteObject 删除指定ID的状态对象
 func (c *Context) DeleteObject(id ObjectID) {
-	var request DeleteObjectRequest
+	var request types.DeleteObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
 
@@ -431,15 +395,9 @@ func (c *Context) DeleteObject(id ObjectID) {
 	}
 }
 
-type LogRequest struct {
-	Contract  Address
-	Event     string
-	KeyValues []any
-}
-
 // Log 记录事件
 func (c *Context) Log(event string, keyValues ...any) {
-	var request LogRequest
+	var request types.LogParams
 	request.Contract = c.ContractAddress()
 	request.Event = event
 	request.KeyValues = keyValues
@@ -483,17 +441,12 @@ func (o *Object) Owner() Address {
 	return owner
 }
 
-type SetOwnerRequest struct {
-	Contract Address
-	ID       ObjectID
-	Owner    Address
-}
-
 // SetOwner 设置对象的所有者
 func (o *Object) SetOwner(owner Address) {
 	// 构造参数
-	request := SetOwnerRequest{
+	request := types.SetOwnerParams{
 		Contract: mock.GetCurrentContract(),
+		Sender:   mock.GetCaller(),
 		ID:       o.id,
 		Owner:    owner,
 	}
@@ -549,18 +502,12 @@ func (o *Object) Get(field string, value interface{}) error {
 	return nil
 }
 
-type SetFieldRequest struct {
-	Contract Address
-	ID       ObjectID
-	Field    string
-	Value    any
-}
-
 // Set 设置对象字段的值
 func (o *Object) Set(field string, value interface{}) error {
 	// 构造参数
-	request := SetFieldRequest{
+	request := types.SetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
+		Sender:   mock.GetCaller(),
 		ID:       o.id,
 		Field:    field,
 		Value:    value,
@@ -579,6 +526,25 @@ func (o *Object) Set(field string, value interface{}) error {
 	}
 
 	return nil
+}
+
+func (o *Object) Contract() Address {
+	// 调用宿主函数
+	resultPtr, resultSize, errCode := callHost(FuncGetObjectContract, o.id[:])
+	if errCode != 0 {
+		return ZeroAddress
+	}
+	// 解析字段值
+	if resultSize == 0 {
+		return ZeroAddress
+	}
+
+	// 读取字段数据
+	fieldData := readMemory(resultPtr, resultSize)
+
+	var contract Address
+	copy(contract[:], fieldData)
+	return contract
 }
 
 // 内存管理函数 - 供主机环境使用
@@ -611,13 +577,6 @@ const (
 
 // 全局错误消息
 var lastErrorMessage string
-
-// 执行结果包装结构
-type ExecutionResult struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-}
 
 // 合约函数处理器类型
 type ContractFunctionHandler func(ctx *Context, params []byte) (interface{}, error)
@@ -667,7 +626,7 @@ func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) 
 		fmt.Println(errMsg)
 
 		// 返回错误结果
-		result := ExecutionResult{
+		result := types.ExecutionResult{
 			Success: false,
 			Error:   errMsg,
 		}
@@ -697,7 +656,7 @@ func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) 
 		fmt.Println(errMsg)
 
 		// 返回错误结果
-		result := ExecutionResult{
+		result := types.ExecutionResult{
 			Success: false,
 			Error:   errMsg,
 		}
@@ -718,7 +677,7 @@ func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) 
 	}
 
 	// 成功执行
-	result := ExecutionResult{
+	result := types.ExecutionResult{
 		Success: true,
 		Data:    data,
 	}

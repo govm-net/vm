@@ -13,10 +13,7 @@ import (
 // 函数ID常量定义 - 从types包导入以确保一致性
 const (
 	FuncGetSender          = int32(types.FuncGetSender)
-	FuncGetBlockHeight     = int32(types.FuncGetBlockHeight)
-	FuncGetBlockTime       = int32(types.FuncGetBlockTime)
 	FuncGetContractAddress = int32(types.FuncGetContractAddress)
-	FuncGetBalance         = int32(types.FuncGetBalance)
 	FuncTransfer           = int32(types.FuncTransfer)
 	FuncCreateObject       = int32(types.FuncCreateObject)
 	FuncCall               = int32(types.FuncCall)
@@ -26,10 +23,8 @@ const (
 	FuncLog                = int32(types.FuncLog)
 	FuncGetObjectOwner     = int32(types.FuncGetObjectOwner)
 	FuncSetObjectOwner     = int32(types.FuncSetObjectOwner)
-	FuncDbRead             = int32(types.FuncDbRead)
-	FuncDbWrite            = int32(types.FuncDbWrite)
-	FuncDbDelete           = int32(types.FuncDbDelete)
-	FuncSetHostBuffer      = int32(types.FuncSetHostBuffer)
+	FuncGetObjectField     = int32(types.FuncGetObjectField)
+	FuncSetObjectField     = int32(types.FuncSetObjectField)
 )
 
 // 定义全局接收数据缓冲区的大小
@@ -103,7 +98,7 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, val
 	// 需要通过缓冲区返回复杂数据的函数
 	case FuncGetSender, FuncGetContractAddress, FuncCall,
 		FuncGetObject, FuncGetObjectWithOwner, FuncCreateObject,
-		FuncGetObjectOwner, FuncDbRead:
+		FuncGetObjectOwner:
 		// 检查是否已设置主机缓冲区
 		if hostBufferPtr == 0 {
 			// 如果主机缓冲区未设置，返回错误
@@ -388,7 +383,7 @@ func (o *Object) Get(field string, value any) error {
 	key := fmt.Sprintf("%x:%s", o.id, field)
 
 	// 调用宿主函数，使用常量FuncDbRead
-	ptr, size, _ := callHost(FuncDbRead, []byte(key))
+	ptr, size, _ := callHost(FuncGetObjectField, []byte(key))
 	if ptr == 0 || size == 0 {
 		return fmt.Errorf("field not found: %s", field)
 	}
@@ -421,7 +416,7 @@ func (o *Object) Set(field string, value any) error {
 	copy(paramData[offset+4:], data)
 
 	// 调用宿主函数，使用常量FuncDbWrite
-	_, _, result := callHost(FuncDbWrite, paramData)
+	_, _, result := callHost(FuncSetObjectField, paramData)
 	if result == 0 {
 		return fmt.Errorf("failed to write value")
 	}

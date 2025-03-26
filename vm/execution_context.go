@@ -310,6 +310,15 @@ func (o *StateObject) Owner() core.Address {
 	return owner
 }
 
+// Contract 获取对象所属合约
+func (o *StateObject) Contract() core.Address {
+	// 从状态管理器获取对象所属合约
+	// 简化实现，实际应该从对象中获取
+	var contract core.Address
+	// TODO: 从对象中获取合约
+	return contract
+}
+
 // SetOwner 设置对象所有者
 func (o *StateObject) SetOwner(addr core.Address) {
 	// 更新对象所有者
