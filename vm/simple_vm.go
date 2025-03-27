@@ -49,7 +49,7 @@ var ZeroObjectID = ObjectID{}
 // SimpleVM 是一个简化的虚拟机实现，用于演示核心功能
 type SimpleVM struct {
 	// 存储已部署合约的映射表
-	contracts     map[string][]byte
+	contracts     map[Address][]byte
 	contractsLock sync.RWMutex
 
 	// 区块信息
@@ -60,9 +60,9 @@ type SimpleVM struct {
 	balances map[Address]uint64
 
 	// 虚拟机对象存储
-	objects     map[string]map[string]interface{}
-	objectOwner map[string]string
-
+	objects        map[core.ObjectID]map[string]interface{}
+	objectOwner    map[core.ObjectID]Address
+	objectContract map[core.ObjectID]Address
 	// 合约存储目录
 	contractDir string
 }
@@ -77,11 +77,12 @@ func NewSimpleVM(contractDir string) (*SimpleVM, error) {
 	}
 
 	return &SimpleVM{
-		contracts:   make(map[string][]byte),
-		balances:    make(map[Address]uint64),
-		objects:     make(map[string]map[string]interface{}),
-		objectOwner: make(map[string]string),
-		contractDir: contractDir,
+		contracts:      make(map[Address][]byte),
+		balances:       make(map[Address]uint64),
+		objects:        make(map[core.ObjectID]map[string]interface{}),
+		objectOwner:    make(map[core.ObjectID]Address),
+		objectContract: make(map[core.ObjectID]Address),
+		contractDir:    contractDir,
 	}, nil
 }
 
@@ -114,9 +115,14 @@ func (vm *SimpleVM) DeployContract(wasmCode []byte, sender core.Address) (core.A
 	// 生成合约地址
 	contractAddr := vm.generateContractAddress(wasmCode, sender)
 
+	var objectID core.ObjectID
+	copy(objectID[:], contractAddr[:])
 	// 存储合约代码
 	vm.contractsLock.Lock()
-	vm.contracts[fmt.Sprintf("%x", contractAddr)] = wasmCode
+	vm.contracts[contractAddr] = wasmCode
+	vm.objects[objectID] = make(map[string]interface{})
+	vm.objectOwner[objectID] = contractAddr
+	vm.objectContract[objectID] = contractAddr
 	vm.contractsLock.Unlock()
 
 	// 如果指定了合约目录，则保存到文件
@@ -134,7 +140,7 @@ func (vm *SimpleVM) DeployContract(wasmCode []byte, sender core.Address) (core.A
 func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Address, functionName string, params []byte) (interface{}, error) {
 	// 检查合约是否存在
 	vm.contractsLock.RLock()
-	wasmCode, exists := vm.contracts[fmt.Sprintf("%x", contractAddr)]
+	wasmCode, exists := vm.contracts[contractAddr]
 	vm.contractsLock.RUnlock()
 
 	if !exists {
@@ -304,25 +310,23 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 	if err != nil {
 		log.Fatalf("handle_contract_call没找到:%v", err)
 	}
+	var input types.HandleContractCallParams
+	input.Contract = ctx.contractAddr
+	input.Function = functionName
+	input.Args = params
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		log.Fatalf("handle_contract_call 序列化失败: %v", err)
+	}
 
-	fnAddr, err := allocate(len(functionName))
+	inputAddr, err := allocate(len(inputBytes))
 	if err != nil {
 		log.Fatalf("fn 内存分配失败: %v", err)
 	}
-	fnPtr := fnAddr.(int32)
-	copy(memory.Data()[int(fnPtr):int(fnPtr)+len(functionName)], []byte(functionName))
+	inputPtr := inputAddr.(int32)
+	copy(memory.Data()[int(inputPtr):int(inputPtr)+len(inputBytes)], []byte(inputBytes))
 
-	var paramAddr int32
-	if len(params) > 0 {
-		paramAddr, err := allocate(len(params))
-		if err != nil {
-			log.Fatalf("param 内存分配失败: %v", err)
-		}
-		paramPtr := paramAddr.(int32)
-		copy(memory.Data()[int(paramPtr):int(paramPtr)+len(params)], params)
-	}
-
-	result, err := processDataFunc(fnPtr, len(functionName), paramAddr, len(params))
+	result, err := processDataFunc(inputPtr, len(inputBytes))
 	if err != nil {
 		log.Fatalf("执行%s 失败: %v", functionName, err)
 	}
@@ -348,11 +352,7 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 		fmt.Println("没有deallocate函数")
 		return 0, fmt.Errorf("没有deallocate函数")
 	}
-	free(fnPtr, len(functionName))
-	if freeErr != nil {
-		fmt.Println("没有free函数")
-		return 0, fmt.Errorf("没有free函数")
-	}
+	free(inputPtr, len(inputBytes))
 
 	return resultLen, nil
 }
@@ -410,9 +410,9 @@ func (ctx *vmContext) CreateObject() core.Object {
 	id := ctx.generateObjectID()
 
 	// 创建对象存储
-	ctx.vm.objects[fmt.Sprintf("%x", id)] = make(map[string]interface{})
-	ctx.vm.objectOwner[fmt.Sprintf("%x", id)] = fmt.Sprintf("%x", ctx.sender)
-
+	ctx.vm.objects[id] = make(map[string]interface{})
+	ctx.vm.objectOwner[id] = ctx.sender
+	ctx.vm.objectContract[id] = ctx.contractAddr
 	// 返回对象封装
 	return &vmObject{
 		vm: ctx.vm,
@@ -433,8 +433,9 @@ func (ctx *vmContext) generateObjectID() core.ObjectID {
 
 // GetObject 获取指定对象
 func (ctx *vmContext) GetObject(id core.ObjectID) (core.Object, error) {
-	_, exists := ctx.vm.objects[fmt.Sprintf("%x", id)]
+	_, exists := ctx.vm.objects[id]
 	if !exists {
+		fmt.Println("对象不存在", id)
 		return nil, errors.New("对象不存在")
 	}
 
@@ -447,10 +448,9 @@ func (ctx *vmContext) GetObject(id core.ObjectID) (core.Object, error) {
 // GetObjectWithOwner 按所有者获取对象
 func (ctx *vmContext) GetObjectWithOwner(contract, owner core.Address) (core.Object, error) {
 	// 简化版，实际应该维护所有者到对象的索引
-	ownerHex := fmt.Sprintf("%x", owner)
 	for _, objOwnerStr := range ctx.vm.objectOwner {
 		// todo: 验证权限
-		if objOwnerStr == ownerHex {
+		if objOwnerStr == owner {
 			// 将字符串ID转换为ObjectID
 			var id core.ObjectID
 			// 简化处理，实际应正确转换
@@ -465,9 +465,9 @@ func (ctx *vmContext) GetObjectWithOwner(contract, owner core.Address) (core.Obj
 
 // DeleteObject 删除对象
 func (ctx *vmContext) DeleteObject(id core.ObjectID) {
-	idHex := fmt.Sprintf("%x", id)
-	delete(ctx.vm.objects, idHex)
-	delete(ctx.vm.objectOwner, idHex)
+	delete(ctx.vm.objects, id)
+	delete(ctx.vm.objectOwner, id)
+	delete(ctx.vm.objectContract, id)
 }
 
 // Call 跨合约调用
@@ -497,21 +497,21 @@ func (o *vmObject) ID() core.ObjectID {
 func (o *vmObject) Owner() core.Address {
 	// 对于简化实现，我们只返回空地址
 	// 实际应该正确转换字符串到地址
-	return core.Address{}
+	return o.vm.objectOwner[o.id]
 }
 
 func (o *vmObject) Contract() core.Address {
-	return core.Address{}
+	return o.vm.objectContract[o.id]
 }
 
 // SetOwner 设置对象所有者
 func (o *vmObject) SetOwner(addr core.Address) {
-	o.vm.objectOwner[fmt.Sprintf("%x", o.id)] = fmt.Sprintf("%x", addr)
+	o.vm.objectOwner[o.id] = addr
 }
 
 // Get 获取字段值
 func (o *vmObject) Get(field string, value interface{}) error {
-	obj, exists := o.vm.objects[fmt.Sprintf("%x", o.id)]
+	obj, exists := o.vm.objects[o.id]
 	if !exists {
 		return errors.New("对象不存在")
 	}
@@ -529,7 +529,7 @@ func (o *vmObject) Get(field string, value interface{}) error {
 
 // Set 设置字段值
 func (o *vmObject) Set(field string, value interface{}) error {
-	obj, exists := o.vm.objects[fmt.Sprintf("%x", o.id)]
+	obj, exists := o.vm.objects[o.id]
 	if !exists {
 		return errors.New("对象不存在")
 	}
@@ -601,9 +601,13 @@ func callHostSetHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, er
 			if err := json.Unmarshal(argData, &params); err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("解析参数失败: %v", err)
 			}
+			if params.ID == (types.ObjectID{}) {
+				copy(params.ID[:], params.Contract[:])
+			}
 			// todo:验证权限
 			obj, err := ctx.GetObject(params.ID)
 			if err != nil {
+				fmt.Println("deleteObject获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 			if obj.Contract() != params.Contract {
@@ -621,11 +625,16 @@ func callHostSetHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, er
 			if err := json.Unmarshal(argData, &params); err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("解析参数失败: %v", err)
 			}
+			if params.ID == (types.ObjectID{}) {
+				copy(params.ID[:], params.Contract[:])
+			}
 			obj, err := ctx.GetObject(params.ID)
 			if err != nil {
+				fmt.Println("setOwner获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 			if obj.Contract() != params.Contract {
+				fmt.Println("权限不足, 合约不匹配", obj.Contract(), params.Contract)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("权限不足, 合约不匹配")
 			}
 			if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
@@ -639,12 +648,17 @@ func callHostSetHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, er
 			if err := json.Unmarshal(argData, &params); err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("解析参数失败: %v", err)
 			}
+			if params.ID == (types.ObjectID{}) {
+				copy(params.ID[:], params.Contract[:])
+			}
 			obj, err := ctx.GetObject(params.ID)
 			if err != nil {
+				fmt.Println("setObjectField获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 			// todo:验证权限
 			if obj.Contract() != params.Contract {
+				fmt.Println("权限不足, 合约不匹配", obj.Contract(), params.Contract)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("权限不足, 合约不匹配")
 			}
 			if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
@@ -732,8 +746,12 @@ func callHostGetBufferHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Val
 			if err := json.Unmarshal(argData, &params); err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("解析参数失败: %v", err)
 			}
+			if params.ID == (types.ObjectID{}) {
+				copy(params.ID[:], params.Contract[:])
+			}
 			obj, err := ctx.GetObject(params.ID)
 			if err != nil {
+				fmt.Println("getObjectField获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 			var data any
@@ -755,14 +773,17 @@ func callHostGetBufferHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Val
 			if err := json.Unmarshal(argData, &params); err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("解析参数失败: %v", err)
 			}
+			fmt.Println("获取对象", params.ID, params.Contract)
 			if params.ID == (types.ObjectID{}) {
 				copy(params.ID[:], params.Contract[:])
 			}
 			obj, err := ctx.GetObject(params.ID)
 			if err != nil {
+				fmt.Println("getObject获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 			if obj.Contract() != params.Contract {
+				fmt.Println("权限不足, 合约不匹配", obj.Contract(), params.Contract)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("权限不足, 合约不匹配")
 			}
 			id := obj.ID()
@@ -788,8 +809,12 @@ func callHostGetBufferHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Val
 			}
 			var objID ObjectID
 			copy(objID[:], argData)
+			if objID == (types.ObjectID{}) {
+				copy(objID[:], argData)
+			}
 			obj, err := ctx.GetObject(objID)
 			if err != nil {
+				fmt.Println("getObjectOwner获取对象失败", objID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
 

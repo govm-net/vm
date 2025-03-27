@@ -120,3 +120,9 @@ type LogParams struct {
 	Event     string  `json:"event,omitempty"`
 	KeyValues []any   `json:"key_values,omitempty"`
 }
+
+type HandleContractCallParams struct {
+	Contract Address `json:"contract,omitempty"`
+	Function string  `json:"function,omitempty"`
+	Args     []byte  `json:"args,omitempty"`
+}

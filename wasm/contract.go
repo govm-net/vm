@@ -606,14 +606,19 @@ func init() {
 // - 结果指针或错误码
 //
 //export handle_contract_call
-func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) int32 {
-	fmt.Println("handle_contract_call", funcNamePtr, funcNameLen, paramsPtr, paramsLen)
+func handle_contract_call(inputPtr, inputLen int32) int32 {
+	fmt.Println("handle_contract_call", inputPtr, inputLen)
 	// 读取函数名
-	funcNameBytes := readMemory(funcNamePtr, funcNameLen)
-	functionName := string(funcNameBytes)
+	inputBytes := readMemory(inputPtr, inputLen)
+	var input types.HandleContractCallParams
+	if err := json.Unmarshal(inputBytes, &input); err != nil {
+		return ErrorCodeExecutionError
+	}
+	functionName := input.Function
 
 	// 读取参数
-	paramsBytes := readMemory(paramsPtr, paramsLen)
+	paramsBytes := input.Args
+	mock.Enter(input.Contract, functionName)
 
 	// 使用mock模块记录函数进入
 	ctx := &Context{}
