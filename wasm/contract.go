@@ -99,6 +99,7 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 	var argPtr int32 = 0
 	var argLen int32 = 0
 
+	fmt.Println("[wasm]--callHost", funcID, string(data))
 	if len(data) > 0 {
 		// 获取参数数据的指针和长度
 		copy(hostBuffer[:len(data)], data)

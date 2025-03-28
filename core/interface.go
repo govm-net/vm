@@ -8,6 +8,8 @@ type Address [20]byte
 // ObjectID 表示状态对象的唯一标识符
 type ObjectID [32]byte
 
+type Hash [32]byte
+
 // Context 是合约与区块链环境交互的主要接口
 type Context interface {
 	// 区块链信息相关

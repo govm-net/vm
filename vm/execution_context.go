@@ -41,6 +41,9 @@ type VMStateManager interface {
 	// 获取区块信息
 	GetBlockHeight() uint64
 	GetBlockTime() int64
+	GetSender() core.Address
+	GetContractAddress() core.Address
+	GetTransactionHash() core.Hash
 
 	// 获取和修改账户余额
 	GetBalance(addr core.Address) uint64

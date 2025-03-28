@@ -129,32 +129,32 @@ type HandleContractCallParams struct {
 }
 
 // Context 是合约与区块链环境交互的主要接口
-type HostContext interface {
+type BlockchainContext interface {
 	// 区块链信息相关
-	BlockHeight() uint64      // 获取当前区块高度
-	BlockTime() int64         // 获取当前区块时间戳
-	ContractAddress() Address // 获取当前合约地址
-
+	BlockHeight() uint64        // 获取当前区块高度
+	BlockTime() int64           // 获取当前区块时间戳
+	ContractAddress() Address   // 获取当前合约地址
+	TransactionHash() core.Hash // 获取当前交易哈希
 	// 账户操作相关
 	Sender() Address                                // 获取交易发送者或调用合约
 	Balance(addr Address) uint64                    // 获取账户余额
 	Transfer(from, to Address, amount uint64) error // 转账操作
 
 	// 对象存储相关 - 基础状态操作使用panic而非返回error
-	CreateObject(contract Address) (HostObject, error)                      // 创建新对象
-	GetObject(contract Address, id ObjectID) (HostObject, error)            // 获取指定对象
-	GetObjectWithOwner(contract Address, owner Address) (HostObject, error) // 按所有者获取对象
-	DeleteObject(contract Address, id ObjectID) error                       // 删除对象
+	CreateObject(contract Address) (VMObject, error)                      // 创建新对象
+	GetObject(contract Address, id ObjectID) (VMObject, error)            // 获取指定对象
+	GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // 按所有者获取对象
+	DeleteObject(contract Address, id ObjectID) error                     // 删除对象
 
 	// 跨合约调用
 	Call(contract Address, function string, args ...any) ([]byte, error)
 
 	// 日志与事件
-	Log(contract Address, eventName string, keyValues ...interface{}) // 记录事件
+	Log(contract Address, eventName string, keyValues ...any) // 记录事件
 }
 
 // Object 接口用于管理区块链状态对象
-type HostObject interface {
+type VMObject interface {
 	ID() ObjectID                // 获取对象ID
 	Owner() Address              // 获取对象所有者
 	Contract() Address           // 获取对象所属合约

@@ -170,8 +170,6 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 	wasiEnv, err := wasmer.NewWasiStateBuilder("wasi-program").
 		// Add WASI args if needed
 		Argument("--verbose").
-		// Map directories if needed
-		MapDirectory(".", ".").
 		// Capture stdout/stderr
 		CaptureStdout().
 		CaptureStderr().
