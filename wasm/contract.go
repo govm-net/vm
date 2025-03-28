@@ -467,12 +467,10 @@ func (o *Object) SetOwner(owner Address) {
 // Get 获取对象字段的值
 func (o *Object) Get(field string, value interface{}) error {
 	// 构造参数
-	getData := struct {
-		ID    ObjectID
-		Field string
-	}{
-		ID:    o.id,
-		Field: field,
+	getData := types.GetObjectFieldParams{
+		Contract: mock.GetCurrentContract(),
+		ID:       o.id,
+		Field:    field,
 	}
 
 	// 序列化参数
@@ -494,7 +492,7 @@ func (o *Object) Get(field string, value interface{}) error {
 
 	// 读取字段数据
 	fieldData := readMemory(resultPtr, resultSize)
-
+	fmt.Println("[wasm]--fieldData", field, string(fieldData))
 	if err := json.Unmarshal(fieldData, value); err != nil {
 		return fmt.Errorf("failed to unmarshal to target type: %w", err)
 	}
@@ -618,6 +616,7 @@ func handle_contract_call(inputPtr, inputLen int32) int32 {
 
 	// 读取参数
 	paramsBytes := input.Args
+	mock.Enter(input.Sender, "handle_contract_call")
 	mock.Enter(input.Contract, functionName)
 
 	// 使用mock模块记录函数进入

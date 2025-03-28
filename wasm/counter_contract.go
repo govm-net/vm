@@ -4,8 +4,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/govm-net/vm/core"
 )
 
 // 计数器合约的状态键
@@ -118,7 +116,7 @@ func Reset(ctx *Context) {
 }
 
 // 初始化计数器函数
-func handleInitialize(ctx *Context, params []byte) (interface{}, error) {
+func handleInitialize(ctx *Context, params []byte) (any, error) {
 	fmt.Println("handleInitialize")
 
 	out := Initialize(ctx)
@@ -127,14 +125,11 @@ func handleInitialize(ctx *Context, params []byte) (interface{}, error) {
 	ctx.Log("CounterInitialized", "value", out)
 
 	// 返回成功结果
-	return map[string]interface{}{
-		"status": "success",
-		"value":  out,
-	}, nil
+	return out, nil
 }
 
 // 增加计数器函数
-func handleIncrement(ctx *Context, params []byte) (interface{}, error) {
+func handleIncrement(ctx *Context, params []byte) (any, error) {
 	// 解析参数
 	var incrParams struct {
 		Amount int64 `json:"amount"`
@@ -154,101 +149,23 @@ func handleIncrement(ctx *Context, params []byte) (interface{}, error) {
 	ctx.Log("CounterIncremented", "amount", incrParams.Amount, "new_value", newValue)
 
 	// 返回成功结果
-	return map[string]interface{}{
-		"status":    "success",
-		"amount":    incrParams.Amount,
-		"new_value": newValue,
-	}, nil
+	return newValue, nil
 }
 
 // 获取计数器当前值
-func handleGetCounter(ctx *Context, params []byte) (interface{}, error) {
-	// 获取计数器对象
-	obj, err := getOrCreateCounterObject(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get counter object: %w", err)
-	}
-
-	// 获取当前值
-	var currentValue int64
-	if err := obj.Get(CounterKey, &currentValue); err != nil {
-		// 如果未找到值，初始化为0
-		currentValue = 0
-	}
+func handleGetCounter(ctx *Context, params []byte) (any, error) {
+	value := GetCounter(ctx)
 
 	// 返回当前值
-	return map[string]interface{}{
-		"status": "success",
-		"value":  currentValue,
-	}, nil
+	return value, nil
 }
 
 // 重置计数器函数
-func handleReset(ctx *Context, params []byte) (interface{}, error) {
+func handleReset(ctx *Context, params []byte) (any, error) {
 	// 验证调用者权限
-	if ctx.Sender() != ctx.ContractAddress() {
-		return nil, fmt.Errorf("permission denied: only contract owner can reset counter")
-	}
-
-	// 解析参数
-	var resetParams struct {
-		Value int64 `json:"value"`
-	}
-
-	if len(params) > 0 {
-		if err := json.Unmarshal(params, &resetParams); err != nil {
-			return nil, fmt.Errorf("invalid reset parameters: %w", err)
-		}
-	} else {
-		// 默认重置为0
-		resetParams.Value = 0
-	}
-
-	// 获取计数器对象
-	obj, err := getOrCreateCounterObject(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get counter object: %w", err)
-	}
-
-	// 获取旧值（用于返回）
-	var oldValue int64
-	if err := obj.Get(CounterKey, &oldValue); err != nil {
-		// 如果未找到值，视为0
-		oldValue = 0
-	}
-
-	// 设置新值
-	if err := obj.Set(CounterKey, resetParams.Value); err != nil {
-		return nil, fmt.Errorf("failed to reset counter value: %w", err)
-	}
-
-	// 记录重置事件
-	ctx.Log("CounterReset", "old_value", oldValue, "new_value", resetParams.Value)
-
+	Reset(ctx)
 	// 返回成功结果
-	return map[string]interface{}{
-		"status":    "success",
-		"old_value": oldValue,
-		"new_value": resetParams.Value,
-	}, nil
-}
-
-// 辅助函数 - 获取或创建计数器对象
-func getOrCreateCounterObject(ctx *Context) (core.Object, error) {
-	// 尝试获取现有对象
-	contractAddr := ctx.ContractAddress()
-	obj, err := ctx.GetObjectWithOwner(contractAddr)
-	if err == nil {
-		return obj, nil
-	}
-
-	// 如果对象不存在，创建新对象
-	obj = ctx.CreateObject()
-
-	// 设置对象所有者为合约自身，确保只有合约可以修改
-	obj.SetOwner(contractAddr)
-
-	return obj, nil
+	return nil, nil
 }
 
 // 注册合约函数

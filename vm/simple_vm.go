@@ -137,7 +137,7 @@ func (vm *SimpleVM) DeployContract(wasmCode []byte, sender core.Address) (core.A
 }
 
 // ExecuteContract 执行已部署的合约函数
-func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Address, functionName string, params []byte) (interface{}, error) {
+func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Address, functionName string, params []byte) ([]byte, error) {
 	// 检查合约是否存在
 	vm.contractsLock.RLock()
 	wasmCode, exists := vm.contracts[contractAddr]
@@ -155,7 +155,9 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 	}
 
 	// Create Wasmer instance
-	engine := wasmer.NewEngine()
+	config := wasmer.NewConfig()
+
+	engine := wasmer.NewEngineWithConfig(config)
 	store := wasmer.NewStore(engine)
 
 	// Compile module
@@ -212,7 +214,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)}, // 结果编码为int32
 			),
-			callHostSetHandler(ctx),
+			ctx.callHostSetHandler(),
 		),
 		"call_host_get_buffer": wasmer.NewFunction(
 			store,
@@ -225,7 +227,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)}, // 返回数据大小
 			),
-			callHostGetBufferHandler(ctx),
+			ctx.callHostGetBufferHandler(),
 		),
 		// 单独的简单数据类型获取函数
 		"get_block_height": wasmer.NewFunction(
@@ -234,7 +236,9 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				[]*wasmer.ValueType{},                                // 无参数
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)}, // 返回int64
 			),
-			getBlockHeightHandler(ctx),
+			func(args []wasmer.Value) ([]wasmer.Value, error) {
+				return []wasmer.Value{wasmer.NewI64(int64(ctx.BlockHeight()))}, nil
+			},
 		),
 		"get_block_time": wasmer.NewFunction(
 			store,
@@ -242,7 +246,9 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				[]*wasmer.ValueType{},                                // 无参数
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I64)}, // 返回int64
 			),
-			getBlockTimeHandler(ctx),
+			func(args []wasmer.Value) ([]wasmer.Value, error) {
+				return []wasmer.Value{wasmer.NewI64(int64(ctx.BlockTime()))}, nil
+			},
 		),
 		"get_balance": wasmer.NewFunction(
 			store,
@@ -252,7 +258,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.F64)}, // 返回float64
 			),
-			getBalanceHandler(ctx),
+			ctx.getBalanceHandler(),
 		),
 		// 保留其他可能需要的函数...
 	})
@@ -293,7 +299,7 @@ func readString(memory *wasmer.Memory, ptr, len int32) string {
 	return string(data)
 }
 
-func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, functionName string, params []byte) (interface{}, error) {
+func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, functionName string, params []byte) ([]byte, error) {
 	fmt.Printf("调用合约函数:%s, %v\n", functionName, params)
 	memory, err := instance.Exports.GetMemory("memory")
 	if err != nil {
@@ -304,7 +310,7 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 	// deallocate, dealErr := instance.Exports.GetFunction("deallocate")
 	if allocErr != nil {
 		fmt.Println("没有allocate函数")
-		return 0, fmt.Errorf("没有allocate函数")
+		return nil, fmt.Errorf("没有allocate函数")
 	}
 	processDataFunc, err := instance.Exports.GetFunction("handle_contract_call")
 	if err != nil {
@@ -313,6 +319,7 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 	var input types.HandleContractCallParams
 	input.Contract = ctx.contractAddr
 	input.Function = functionName
+	input.Sender = ctx.sender
 	input.Args = params
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -331,11 +338,12 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 		log.Fatalf("执行%s 失败: %v", functionName, err)
 	}
 	resultLen, _ := result.(int32)
+	var out []byte
 	if resultLen > 0 {
 		getBufferAddress, getBufferErr := instance.Exports.GetFunction("get_buffer_address")
 		if getBufferErr != nil {
 			fmt.Println("没有get_buffer_address函数")
-			return 0, fmt.Errorf("没有get_buffer_address函数")
+			return nil, fmt.Errorf("没有get_buffer_address函数")
 		}
 		rst, err := getBufferAddress()
 		if err != nil {
@@ -344,17 +352,18 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 		bufferPtr := rst.(int32)
 		data := readString(memory, bufferPtr, resultLen)
 		fmt.Printf("result: %s\n", data)
+		out = []byte(data)
 	}
 	fmt.Printf("执行结束:%s, %v\n", functionName, result)
 	//free memory
 	free, freeErr := instance.Exports.GetFunction("deallocate")
 	if freeErr != nil {
 		fmt.Println("没有deallocate函数")
-		return 0, fmt.Errorf("没有deallocate函数")
+		return nil, fmt.Errorf("没有deallocate函数")
 	}
 	free(inputPtr, len(inputBytes))
 
-	return resultLen, nil
+	return out, nil
 }
 
 // vmContext 实现了合约执行上下文
@@ -520,6 +529,12 @@ func (o *vmObject) Get(field string, value interface{}) error {
 	if !exists {
 		return errors.New("字段不存在")
 	}
+	d, _ := json.Marshal(fieldValue)
+	err := json.Unmarshal(d, value)
+	if err != nil {
+		fmt.Printf("obj.get 反序列化失败: %v\n", err)
+		return err
+	}
 
 	// 这里简化处理，实际应根据类型正确转换
 	// 应该使用反射或类型断言
@@ -545,7 +560,7 @@ var state = &HostState{
 }
 
 // 合并所有宿主函数到统一的调用处理器 - 用于设置数据的函数
-func callHostSetHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 4 {
 			fmt.Println("参数数量不正确")
@@ -675,7 +690,7 @@ func callHostSetHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, er
 }
 
 // 合并所有宿主函数到统一的调用处理器 - 用于获取缓冲区数据的函数
-func callHostGetBufferHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 4 {
 			fmt.Println("参数数量不正确")
@@ -830,22 +845,8 @@ func callHostGetBufferHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Val
 	}
 }
 
-// 获取区块高度处理函数
-func getBlockHeightHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, error) {
-	return func(args []wasmer.Value) ([]wasmer.Value, error) {
-		return []wasmer.Value{wasmer.NewI64(int64(ctx.vm.blockHeight))}, nil
-	}
-}
-
-// 获取区块时间处理函数
-func getBlockTimeHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, error) {
-	return func(args []wasmer.Value) ([]wasmer.Value, error) {
-		return []wasmer.Value{wasmer.NewI64(ctx.vm.blockTime)}, nil
-	}
-}
-
 // 获取余额处理函数
-func getBalanceHandler(ctx *vmContext) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (ctx *vmContext) getBalanceHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 1 {
 			fmt.Println("参数数量不正确")

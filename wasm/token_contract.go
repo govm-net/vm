@@ -3,6 +3,8 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/govm-net/vm/core"
 )
 
 // 常量定义 - 对象中的字段名
@@ -19,37 +21,37 @@ const (
 )
 
 // 初始化令牌合约
-func InitializeToken(ctx *Context, name string, symbol string, decimals uint8, totalSupply uint64) int32 {
+func InitializeToken(ctx *Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
 	// 获取默认Object（空ObjectID）
 	defaultObj, err := ctx.GetObject(ObjectID{})
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	// 存储令牌基本信息
 	err = defaultObj.Set(TokenNameKey, name)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌名称失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	err = defaultObj.Set(TokenSymbolKey, symbol)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌符号失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	err = defaultObj.Set(TokenDecimalsKey, decimals)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌小数位失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	err = defaultObj.Set(TokenTotalSupplyKey, totalSupply)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储总供应量失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	// 存储令牌所有者（部署者）
@@ -57,14 +59,14 @@ func InitializeToken(ctx *Context, name string, symbol string, decimals uint8, t
 	err = defaultObj.Set(TokenOwnerKey, owner)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌所有者失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	// 创建所有者余额对象
 	err = setBalance(ctx, owner, totalSupply)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("初始化所有者余额失败: %v", err))
-		return -1
+		return core.ObjectID{}
 	}
 
 	// 记录初始化事件
@@ -75,7 +77,7 @@ func InitializeToken(ctx *Context, name string, symbol string, decimals uint8, t
 		"total_supply", totalSupply,
 		"owner", owner)
 
-	return 0
+	return defaultObj.ID()
 }
 
 // 获取令牌信息
@@ -331,22 +333,10 @@ func Burn(ctx *Context, amount uint64) bool {
 	return true
 }
 
-// 辅助函数 - 生成余额对象ID
-func getBalanceObjectID(owner Address) ObjectID {
-	// 简化实现：使用固定前缀和所有者地址的前16字节
-	var id ObjectID
-	balanceKey := fmt.Sprintf("%s%x", BalancePrefix, owner[:16])
-	copy(id[:], []byte(balanceKey))
-	return id
-}
-
 // 辅助函数 - 获取账户余额
 func getBalance(ctx *Context, owner Address) (uint64, error) {
-	// 获取余额对象ID
-	balanceID := getBalanceObjectID(owner)
-
 	// 尝试获取余额对象
-	obj, err := ctx.GetObject(balanceID)
+	obj, err := ctx.GetObjectWithOwner(owner)
 	if err != nil {
 		// 如果对象不存在，返回0余额
 		return 0, nil
@@ -365,11 +355,8 @@ func getBalance(ctx *Context, owner Address) (uint64, error) {
 
 // 辅助函数 - 设置账户余额
 func setBalance(ctx *Context, owner Address, amount uint64) error {
-	// 获取余额对象ID
-	balanceID := getBalanceObjectID(owner)
-
 	// 尝试获取余额对象
-	obj, err := ctx.GetObject(balanceID)
+	obj, err := ctx.GetObjectWithOwner(owner)
 	if err != nil {
 		// 如果对象不存在，创建新对象
 		obj = ctx.CreateObject()

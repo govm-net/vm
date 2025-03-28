@@ -2,22 +2,20 @@
 package vm
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
 
 	"github.com/govm-net/vm/core"
-	"github.com/govm-net/vm/types"
 )
 
-func TestNewSimpleVM(t *testing.T) {
-	svm, err := NewSimpleVM("")
+func TestNewWazeroVM(t *testing.T) {
+	svm, err := NewWazeroVM("")
 	if err != nil {
-		t.Fatalf("NewSimpleVM() error = %v", err)
+		t.Fatalf("NewWazeroVM() error = %v", err)
 	}
 	if svm == nil {
-		t.Fatalf("NewSimpleVM() = nil, want non-nil")
+		t.Fatalf("NewWazeroVM() = nil, want non-nil")
 	}
 
 	code, err := os.ReadFile("../wasm/contract.wasm")
@@ -51,21 +49,6 @@ func TestNewSimpleVM(t *testing.T) {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
 	fmt.Printf("result: %v, type: %T\n", result, result)
-	var rst types.ExecutionResult
-	err = json.Unmarshal(result, &rst)
-	if err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-	fmt.Printf("rst: %v, type: %T\n", rst, rst)
-	if rst.Success != true {
-		t.Fatalf("ExecutionStatus = %v, want %v", rst.Success, true)
-	}
-	if rst.Data == nil {
-		t.Fatalf("Data = %v, want %v", rst.Data, nil)
-	}
-	if rst.Data != nil {
-		t.Fatalf("Data = %v, want %v", rst.Data, nil)
-	}
 
 	t.Error(result)
 }
