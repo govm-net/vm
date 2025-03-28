@@ -175,4 +175,7 @@ func init() {
 	registerContractFunction("Increment", handleIncrement)
 	registerContractFunction("GetCounter", handleGetCounter)
 	registerContractFunction("Reset", handleReset)
+	registerContractFunction("Panic", func(ctx *Context, params []byte) (any, error) {
+		panic("test panic")
+	})
 }

@@ -52,19 +52,11 @@ type SimpleVM struct {
 	contracts     map[Address][]byte
 	contractsLock sync.RWMutex
 
-	// 区块信息
-	blockHeight uint64
-	blockTime   int64
-
-	// 账户余额
-	balances map[Address]uint64
-
-	// 虚拟机对象存储
-	objects        map[core.ObjectID]map[string]interface{}
-	objectOwner    map[core.ObjectID]Address
-	objectContract map[core.ObjectID]Address
 	// 合约存储目录
 	contractDir string
+
+	// 外部区块链上下文
+	blockchainCtx types.BlockchainContext
 }
 
 // NewSimpleVM 创建一个新的简化虚拟机实例
@@ -76,25 +68,15 @@ func NewSimpleVM(contractDir string) (*SimpleVM, error) {
 		}
 	}
 
-	return &SimpleVM{
-		contracts:      make(map[Address][]byte),
-		balances:       make(map[Address]uint64),
-		objects:        make(map[core.ObjectID]map[string]interface{}),
-		objectOwner:    make(map[core.ObjectID]Address),
-		objectContract: make(map[core.ObjectID]Address),
-		contractDir:    contractDir,
-	}, nil
-}
+	vm := &SimpleVM{
+		contracts:   make(map[Address][]byte),
+		contractDir: contractDir,
+	}
 
-// SetBlockInfo 设置当前区块信息
-func (vm *SimpleVM) SetBlockInfo(height uint64, time int64) {
-	vm.blockHeight = height
-	vm.blockTime = time
-}
+	// 创建默认的区块链上下文
+	vm.blockchainCtx = NewSimpleBlockchainContext()
 
-// SetBalance 设置账户余额
-func (vm *SimpleVM) SetBalance(addr core.Address, balance uint64) {
-	vm.balances[addr] = balance
+	return vm, nil
 }
 
 // DeployContract 部署新的WebAssembly合约
@@ -120,10 +102,8 @@ func (vm *SimpleVM) DeployContract(wasmCode []byte, sender core.Address) (core.A
 	// 存储合约代码
 	vm.contractsLock.Lock()
 	vm.contracts[contractAddr] = wasmCode
-	vm.objects[objectID] = make(map[string]interface{})
-	vm.objectOwner[objectID] = contractAddr
-	vm.objectContract[objectID] = contractAddr
 	vm.contractsLock.Unlock()
+	vm.blockchainCtx.CreateObjectWithID(contractAddr, objectID)
 
 	// 如果指定了合约目录，则保存到文件
 	if vm.contractDir != "" {
@@ -137,7 +117,7 @@ func (vm *SimpleVM) DeployContract(wasmCode []byte, sender core.Address) (core.A
 }
 
 // ExecuteContract 执行已部署的合约函数
-func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Address, functionName string, params []byte) ([]byte, error) {
+func (vm *SimpleVM) ExecuteContract(ctx types.BlockchainContext, contractAddr, sender core.Address, functionName string, params []byte) ([]byte, error) {
 	// 检查合约是否存在
 	vm.contractsLock.RLock()
 	wasmCode, exists := vm.contracts[contractAddr]
@@ -146,17 +126,12 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 	if !exists {
 		return nil, fmt.Errorf("合约不存在: %x", contractAddr)
 	}
-
-	// 创建执行上下文
-	ctx := &vmContext{
-		vm:           vm,
-		contractAddr: contractAddr,
-		sender:       sender,
+	if ctx == nil {
+		ctx = vm.blockchainCtx
 	}
 
 	// Create Wasmer instance
 	config := wasmer.NewConfig()
-
 	engine := wasmer.NewEngineWithConfig(config)
 	store := wasmer.NewStore(engine)
 
@@ -212,7 +187,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)}, // 结果编码为int32
 			),
-			ctx.callHostSetHandler(),
+			vm.callHostSetHandler(ctx, memory),
 		),
 		"call_host_get_buffer": wasmer.NewFunction(
 			store,
@@ -225,7 +200,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.I32)}, // 返回数据大小
 			),
-			ctx.callHostGetBufferHandler(),
+			vm.callHostGetBufferHandler(ctx, memory),
 		),
 		// 单独的简单数据类型获取函数
 		"get_block_height": wasmer.NewFunction(
@@ -256,7 +231,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 				},
 				[]*wasmer.ValueType{wasmer.NewValueType(wasmer.F64)}, // 返回float64
 			),
-			ctx.getBalanceHandler(),
+			vm.getBalanceHandler(ctx, memory),
 		),
 		// 保留其他可能需要的函数...
 	})
@@ -271,7 +246,7 @@ func (vm *SimpleVM) ExecuteContract(contractAddr core.Address, sender core.Addre
 	if err != nil {
 		log.Fatalf("无法获取内存: %v", err)
 	}
-	ctx.memory = m
+	*memory = *m
 	result, err := vm.callWasmFunction(ctx, instance, functionName, params)
 	if err != nil {
 		return nil, err
@@ -297,7 +272,7 @@ func readString(memory *wasmer.Memory, ptr, len int32) string {
 	return string(data)
 }
 
-func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, functionName string, params []byte) ([]byte, error) {
+func (vm *SimpleVM) callWasmFunction(ctx types.BlockchainContext, instance *wasmer.Instance, functionName string, params []byte) ([]byte, error) {
 	fmt.Printf("调用合约函数:%s, %v\n", functionName, params)
 	memory, err := instance.Exports.GetMemory("memory")
 	if err != nil {
@@ -315,9 +290,9 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 		log.Fatalf("handle_contract_call没找到:%v", err)
 	}
 	var input types.HandleContractCallParams
-	input.Contract = ctx.contractAddr
+	input.Contract = ctx.ContractAddress()
 	input.Function = functionName
-	input.Sender = ctx.sender
+	input.Sender = ctx.Sender()
 	input.Args = params
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -333,7 +308,8 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 
 	result, err := processDataFunc(inputPtr, len(inputBytes))
 	if err != nil {
-		log.Fatalf("执行%s 失败: %v", functionName, err)
+		log.Printf("执行%s 失败: %v", functionName, err)
+		return nil, err
 	}
 	resultLen, _ := result.(int32)
 	var out []byte
@@ -360,110 +336,172 @@ func (vm *SimpleVM) callWasmFunction(ctx *vmContext, instance *wasmer.Instance, 
 		return nil, fmt.Errorf("没有deallocate函数")
 	}
 	free(inputPtr, len(inputBytes))
+	if resultLen < 0 {
+		return nil, fmt.Errorf("执行%s 失败: %v", functionName, result)
+	}
 
 	return out, nil
 }
 
-// vmContext 实现了合约执行上下文
-type vmContext struct {
-	vm           *SimpleVM
-	contractAddr core.Address
-	sender       core.Address
-	memory       *wasmer.Memory
+// simpleBlockchainContext 实现了默认的区块链上下文
+type simpleBlockchainContext struct {
+	// 区块信息
+	blockHeight uint64
+	blockTime   int64
+
+	// 账户余额
+	balances map[types.Address]uint64
+
+	// 虚拟机对象存储
+	objects        map[core.ObjectID]map[string]interface{}
+	objectOwner    map[core.ObjectID]types.Address
+	objectContract map[core.ObjectID]types.Address
+
+	// 当前执行上下文
+	contractAddr types.Address
+	sender       types.Address
+	txHash       core.Hash
+}
+
+// NewSimpleBlockchainContext 创建一个新的简单区块链上下文
+func NewSimpleBlockchainContext() *simpleBlockchainContext {
+	return &simpleBlockchainContext{
+		blockHeight:    100,
+		blockTime:      200,
+		balances:       make(map[Address]uint64),
+		objects:        make(map[core.ObjectID]map[string]interface{}),
+		objectOwner:    make(map[core.ObjectID]Address),
+		objectContract: make(map[core.ObjectID]Address),
+	}
+}
+
+// SetExecutionContext 设置当前执行上下文
+func (ctx *simpleBlockchainContext) SetExecutionContext(contractAddr, sender types.Address) {
+	ctx.contractAddr = contractAddr
+	ctx.sender = sender
+}
+
+func (ctx *simpleBlockchainContext) WithTransaction(txHash core.Hash) types.BlockchainContext {
+	ctx.txHash = txHash
+	return ctx
+}
+
+func (ctx *simpleBlockchainContext) WithBlock(height uint64, time int64) types.BlockchainContext {
+	ctx.blockHeight = height
+	ctx.blockTime = time
+	return ctx
 }
 
 // BlockHeight 获取当前区块高度
-func (ctx *vmContext) BlockHeight() uint64 {
-	return ctx.vm.blockHeight
+func (ctx *simpleBlockchainContext) BlockHeight() uint64 {
+	return ctx.blockHeight
 }
 
 // BlockTime 获取当前区块时间戳
-func (ctx *vmContext) BlockTime() int64 {
-	return ctx.vm.blockTime
+func (ctx *simpleBlockchainContext) BlockTime() int64 {
+	return ctx.blockTime
 }
 
 // ContractAddress 获取当前合约地址
-func (ctx *vmContext) ContractAddress() core.Address {
+func (ctx *simpleBlockchainContext) ContractAddress() types.Address {
 	return ctx.contractAddr
 }
 
+// TransactionHash 获取当前交易哈希
+func (ctx *simpleBlockchainContext) TransactionHash() core.Hash {
+	return core.Hash{} // 简化实现
+}
+
 // Sender 获取交易发送者
-func (ctx *vmContext) Sender() core.Address {
+func (ctx *simpleBlockchainContext) Sender() types.Address {
 	return ctx.sender
 }
 
 // Balance 获取账户余额
-func (ctx *vmContext) Balance(addr core.Address) uint64 {
-	return ctx.vm.balances[addr]
+func (ctx *simpleBlockchainContext) Balance(addr types.Address) uint64 {
+	return ctx.balances[addr]
 }
 
 // Transfer 转账操作
-func (ctx *vmContext) Transfer(from core.Address, to core.Address, amount uint64) error {
+func (ctx *simpleBlockchainContext) Transfer(from, to types.Address, amount uint64) error {
 	// 检查余额
-	fromBalance := ctx.vm.balances[from]
+	fromBalance := ctx.balances[from]
 	if fromBalance < amount {
 		return errors.New("余额不足")
 	}
 
 	// 执行转账
-	ctx.vm.balances[from] -= amount
-	ctx.vm.balances[to] += amount
+	ctx.balances[from] -= amount
+	ctx.balances[to] += amount
 	return nil
 }
 
 // CreateObject 创建新对象
-func (ctx *vmContext) CreateObject() core.Object {
+func (ctx *simpleBlockchainContext) CreateObject(contract types.Address) (types.VMObject, error) {
 	// 创建对象ID，简化版使用随机数
-	id := ctx.generateObjectID()
+	id := ctx.generateObjectID(contract)
 
 	// 创建对象存储
-	ctx.vm.objects[id] = make(map[string]interface{})
-	ctx.vm.objectOwner[id] = ctx.sender
-	ctx.vm.objectContract[id] = ctx.contractAddr
+	ctx.objects[id] = make(map[string]interface{})
+	ctx.objectOwner[id] = ctx.Sender()
+	ctx.objectContract[id] = contract
+
 	// 返回对象封装
 	return &vmObject{
-		vm: ctx.vm,
-		id: id,
-	}
+		objects:        ctx.objects,
+		objectOwner:    ctx.objectOwner,
+		objectContract: ctx.objectContract,
+		id:             id,
+	}, nil
+}
+
+// CreateObject 创建新对象
+func (ctx *simpleBlockchainContext) CreateObjectWithID(contract types.Address, id types.ObjectID) (types.VMObject, error) {
+	// 创建对象存储
+	ctx.objects[id] = make(map[string]interface{})
+	ctx.objectOwner[id] = ctx.Sender()
+	ctx.objectContract[id] = contract
+
+	// 返回对象封装
+	return &vmObject{
+		objects:        ctx.objects,
+		objectOwner:    ctx.objectOwner,
+		objectContract: ctx.objectContract,
+		id:             id,
+	}, nil
 }
 
 // generateObjectID 生成一个新的对象ID
-func (ctx *vmContext) generateObjectID() core.ObjectID {
-	// 简化实现，实际应使用哈希或随机数
+func (ctx *simpleBlockchainContext) generateObjectID(contract types.Address) core.ObjectID {
 	var id core.ObjectID
-	// 使用合约地址的前16字节和当前时间的后16字节
-	copy(id[:16], ctx.contractAddr[:16])
-	// 后16字节随机生成
-	// 实际实现应使用安全的随机数生成
+	copy(id[:16], contract[:16])
 	return id
 }
 
 // GetObject 获取指定对象
-func (ctx *vmContext) GetObject(id core.ObjectID) (core.Object, error) {
-	_, exists := ctx.vm.objects[id]
+func (ctx *simpleBlockchainContext) GetObject(contract types.Address, id core.ObjectID) (types.VMObject, error) {
+	_, exists := ctx.objects[id]
 	if !exists {
-		fmt.Println("对象不存在", id)
 		return nil, errors.New("对象不存在")
 	}
 
 	return &vmObject{
-		vm: ctx.vm,
-		id: id,
+		objects:        ctx.objects,
+		objectOwner:    ctx.objectOwner,
+		objectContract: ctx.objectContract,
+		id:             id,
 	}, nil
 }
 
 // GetObjectWithOwner 按所有者获取对象
-func (ctx *vmContext) GetObjectWithOwner(contract, owner core.Address) (core.Object, error) {
-	// 简化版，实际应该维护所有者到对象的索引
-	for _, objOwnerStr := range ctx.vm.objectOwner {
-		// todo: 验证权限
-		if objOwnerStr == owner {
-			// 将字符串ID转换为ObjectID
-			var id core.ObjectID
-			// 简化处理，实际应正确转换
+func (ctx *simpleBlockchainContext) GetObjectWithOwner(contract, owner types.Address) (types.VMObject, error) {
+	for id, objOwner := range ctx.objectOwner {
+		if objOwner == owner {
 			return &vmObject{
-				vm: ctx.vm,
-				id: id,
+				objects:        ctx.objects,
+				objectOwner:    ctx.objectOwner,
+				objectContract: ctx.objectContract,
+				id:             id,
 			}, nil
 		}
 	}
@@ -471,28 +509,29 @@ func (ctx *vmContext) GetObjectWithOwner(contract, owner core.Address) (core.Obj
 }
 
 // DeleteObject 删除对象
-func (ctx *vmContext) DeleteObject(id core.ObjectID) {
-	delete(ctx.vm.objects, id)
-	delete(ctx.vm.objectOwner, id)
-	delete(ctx.vm.objectContract, id)
+func (ctx *simpleBlockchainContext) DeleteObject(contract types.Address, id core.ObjectID) error {
+	delete(ctx.objects, id)
+	delete(ctx.objectOwner, id)
+	delete(ctx.objectContract, id)
+	return nil
 }
 
 // Call 跨合约调用
-func (ctx *vmContext) Call(contract core.Address, function string, args ...interface{}) ([]byte, error) {
-	// 简化版，实际应实现完整的跨合约调用逻辑
+func (ctx *simpleBlockchainContext) Call(contract types.Address, function string, args ...any) ([]byte, error) {
 	return nil, errors.New("未实现跨合约调用")
 }
 
 // Log 记录事件
-func (ctx *vmContext) Log(eventName string, keyValues ...interface{}) {
-	// 简化版，仅打印日志
-	fmt.Printf("合约日志: %s, 合约: %x, 参数: %v\n", eventName, ctx.contractAddr, keyValues)
+func (ctx *simpleBlockchainContext) Log(contract types.Address, eventName string, keyValues ...any) {
+	fmt.Printf("合约日志: %s, 合约: %x, 参数: %v\n", eventName, contract, keyValues)
 }
 
 // vmObject 实现了对象接口
 type vmObject struct {
-	vm *SimpleVM
-	id core.ObjectID
+	objects        map[core.ObjectID]map[string]interface{}
+	objectOwner    map[core.ObjectID]types.Address
+	objectContract map[core.ObjectID]types.Address
+	id             core.ObjectID
 }
 
 // ID 获取对象ID
@@ -501,64 +540,59 @@ func (o *vmObject) ID() core.ObjectID {
 }
 
 // Owner 获取对象所有者
-func (o *vmObject) Owner() core.Address {
-	// 对于简化实现，我们只返回空地址
-	// 实际应该正确转换字符串到地址
-	return o.vm.objectOwner[o.id]
+func (o *vmObject) Owner() types.Address {
+	return o.objectOwner[o.id]
 }
 
-func (o *vmObject) Contract() core.Address {
-	return o.vm.objectContract[o.id]
+// Contract 获取对象所属合约
+func (o *vmObject) Contract() types.Address {
+	return o.objectContract[o.id]
 }
 
 // SetOwner 设置对象所有者
-func (o *vmObject) SetOwner(addr core.Address) {
-	o.vm.objectOwner[o.id] = addr
+func (o *vmObject) SetOwner(addr types.Address) error {
+	o.objectOwner[o.id] = addr
+	return nil
 }
 
 // Get 获取字段值
-func (o *vmObject) Get(field string, value interface{}) error {
-	obj, exists := o.vm.objects[o.id]
+func (o *vmObject) Get(field string) ([]byte, error) {
+	obj, exists := o.objects[o.id]
 	if !exists {
-		return errors.New("对象不存在")
+		return nil, errors.New("对象不存在")
 	}
 
 	fieldValue, exists := obj[field]
 	if !exists {
-		return errors.New("字段不存在")
-	}
-	d, _ := json.Marshal(fieldValue)
-	err := json.Unmarshal(d, value)
-	if err != nil {
-		fmt.Printf("obj.get 反序列化失败: %v\n", err)
-		return err
+		return nil, errors.New("字段不存在")
 	}
 
-	// 这里简化处理，实际应根据类型正确转换
-	// 应该使用反射或类型断言
-	fmt.Printf("获取字段: %s = %v\n", field, fieldValue)
-	return nil
+	data, err := json.Marshal(fieldValue)
+	if err != nil {
+		return nil, fmt.Errorf("序列化失败: %w", err)
+	}
+
+	return data, nil
 }
 
 // Set 设置字段值
-func (o *vmObject) Set(field string, value interface{}) error {
-	obj, exists := o.vm.objects[o.id]
+func (o *vmObject) Set(field string, value []byte) error {
+	obj, exists := o.objects[o.id]
 	if !exists {
 		return errors.New("对象不存在")
 	}
 
-	obj[field] = value
+	var fieldValue interface{}
+	if err := json.Unmarshal(value, &fieldValue); err != nil {
+		return fmt.Errorf("反序列化失败: %w", err)
+	}
+
+	obj[field] = fieldValue
 	return nil
 }
 
-var state = &HostState{
-	Balances:       make(map[Address]uint64),
-	Objects:        make(map[ObjectID]core.Object),
-	ObjectsByOwner: make(map[Address][]ObjectID),
-}
-
 // 合并所有宿主函数到统一的调用处理器 - 用于设置数据的函数
-func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
+func (vm *SimpleVM) callHostSetHandler(ctx types.BlockchainContext, memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 4 {
 			fmt.Println("参数数量不正确")
@@ -574,13 +608,13 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 		var argData []byte
 		if argLen > 0 {
 			// 安全检查 - 确保memory不为nil
-			if ctx.memory == nil {
+			if memory == nil {
 				fmt.Println("内存实例为空")
 				return []wasmer.Value{wasmer.NewI64(0)}, fmt.Errorf("内存实例为空")
 			}
 
 			// 获取内存大小
-			memorySize := int32(len(ctx.memory.Data()))
+			memorySize := int32(len(memory.Data()))
 
 			// 检查参数指针和长度是否有效
 			if argPtr < 0 || argPtr >= memorySize || argPtr+argLen > memorySize {
@@ -590,7 +624,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 
 			// 安全地读取参数数据
 			argData = make([]byte, argLen)
-			copy(argData, ctx.memory.Data()[argPtr:argPtr+argLen])
+			copy(argData, memory.Data()[argPtr:argPtr+argLen])
 			fmt.Printf("[HOST] Set函数 ID=%d, 参数长度=%d, 参数数据:%s\n", funcID, argLen, string(argData))
 		}
 
@@ -618,7 +652,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 				copy(params.ID[:], params.Contract[:])
 			}
 			// todo:验证权限
-			obj, err := ctx.GetObject(params.ID)
+			obj, err := ctx.GetObject(params.Contract, params.ID)
 			if err != nil {
 				fmt.Println("deleteObject获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
@@ -626,7 +660,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 			if obj.Contract() != params.Contract {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("权限不足")
 			}
-			ctx.DeleteObject(params.ID)
+			ctx.DeleteObject(params.Contract, params.ID)
 			return []wasmer.Value{wasmer.NewI32(0)}, nil
 		case FuncLog: // 记录日志
 			// 实现日志记录的逻辑...
@@ -641,7 +675,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 			if params.ID == (types.ObjectID{}) {
 				copy(params.ID[:], params.Contract[:])
 			}
-			obj, err := ctx.GetObject(params.ID)
+			obj, err := ctx.GetObject(params.Contract, params.ID)
 			if err != nil {
 				fmt.Println("setOwner获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
@@ -664,7 +698,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 			if params.ID == (types.ObjectID{}) {
 				copy(params.ID[:], params.Contract[:])
 			}
-			obj, err := ctx.GetObject(params.ID)
+			obj, err := ctx.GetObject(params.Contract, params.ID)
 			if err != nil {
 				fmt.Println("setObjectField获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
@@ -677,7 +711,11 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 			if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("权限不足, 所有者不匹配")
 			}
-			obj.Set(params.Field, params.Value)
+			value, err := json.Marshal(params.Value)
+			if err != nil {
+				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("序列化失败: %v", err)
+			}
+			obj.Set(params.Field, value)
 			return []wasmer.Value{wasmer.NewI32(0)}, nil
 
 		default:
@@ -688,7 +726,7 @@ func (ctx *vmContext) callHostSetHandler() func([]wasmer.Value) ([]wasmer.Value,
 }
 
 // 合并所有宿主函数到统一的调用处理器 - 用于获取缓冲区数据的函数
-func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
+func (vm *SimpleVM) callHostGetBufferHandler(ctx types.BlockchainContext, memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 4 {
 			fmt.Println("参数数量不正确")
@@ -702,13 +740,13 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 		fmt.Printf("调用宿主GetBuffer函数 ID=%d, 参数指针=%d, 参数长度=%d, 缓冲区指针=%d\n", funcID, argPtr, argLen, bufferPtr)
 
 		// 安全检查 - 确保memory不为nil
-		if ctx.memory == nil {
+		if memory == nil {
 			fmt.Println("内存实例为空")
 			return []wasmer.Value{wasmer.NewI32(0)}, fmt.Errorf("内存实例为空")
 		}
 
 		// 获取内存大小
-		memorySize := int32(len(ctx.memory.Data()))
+		memorySize := int32(len(memory.Data()))
 
 		// 读取参数数据，添加安全检查
 		var argData []byte
@@ -721,7 +759,7 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 
 			// 安全地读取参数数据
 			argData = make([]byte, argLen)
-			copy(argData, ctx.memory.Data()[argPtr:argPtr+argLen])
+			copy(argData, memory.Data()[argPtr:argPtr+argLen])
 		}
 
 		// 检查主机缓冲区是否在有效范围内
@@ -731,7 +769,7 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 		}
 
 		// 获取全局缓冲区
-		hostBuffer := ctx.memory.Data()[bufferPtr : bufferPtr+types.HostBufferSize]
+		hostBuffer := memory.Data()[bufferPtr : bufferPtr+types.HostBufferSize]
 
 		// 根据函数ID执行不同的操作 - 处理需要返回缓冲区数据的操作
 		switch funcID {
@@ -746,7 +784,12 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
 
 		case FuncCreateObject: // 创建对象
-			obj := ctx.CreateObject()
+			var addr Address
+			copy(addr[:], argData)
+			obj, err := ctx.CreateObject(addr)
+			if err != nil {
+				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("创建对象失败: %v", err)
+			}
 			id := obj.ID()
 
 			// 写入对象ID到全局缓冲区
@@ -762,18 +805,16 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 			if params.ID == (types.ObjectID{}) {
 				copy(params.ID[:], params.Contract[:])
 			}
-			obj, err := ctx.GetObject(params.ID)
+			obj, err := ctx.GetObject(params.Contract, params.ID)
 			if err != nil {
 				fmt.Println("getObjectField获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
 			}
-			var data any
-			err = obj.Get(params.Field, &data)
+			data, err := obj.Get(params.Field)
 			if err != nil {
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取字段失败: %v", err)
 			}
-			d, _ := json.Marshal(data)
-			dataSize := copy(hostBuffer, d)
+			dataSize := copy(hostBuffer, data)
 			return []wasmer.Value{wasmer.NewI32(int32(dataSize))}, nil
 		case FuncCall: // 调用合约
 			// 实现合约调用逻辑并将结果写入全局缓冲区
@@ -790,7 +831,7 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 			if params.ID == (types.ObjectID{}) {
 				copy(params.ID[:], params.Contract[:])
 			}
-			obj, err := ctx.GetObject(params.ID)
+			obj, err := ctx.GetObject(params.Contract, params.ID)
 			if err != nil {
 				fmt.Println("getObject获取对象失败", params.ID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
@@ -825,7 +866,7 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 			if objID == (types.ObjectID{}) {
 				copy(objID[:], argData)
 			}
-			obj, err := ctx.GetObject(objID)
+			obj, err := ctx.GetObject(Address{}, objID)
 			if err != nil {
 				fmt.Println("getObjectOwner获取对象失败", objID)
 				return []wasmer.Value{wasmer.NewI64(-1)}, fmt.Errorf("获取对象失败: %v", err)
@@ -844,7 +885,7 @@ func (ctx *vmContext) callHostGetBufferHandler() func([]wasmer.Value) ([]wasmer.
 }
 
 // 获取余额处理函数
-func (ctx *vmContext) getBalanceHandler() func([]wasmer.Value) ([]wasmer.Value, error) {
+func (vm *SimpleVM) getBalanceHandler(ctx types.BlockchainContext, memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 1 {
 			fmt.Println("参数数量不正确")
@@ -854,13 +895,13 @@ func (ctx *vmContext) getBalanceHandler() func([]wasmer.Value) ([]wasmer.Value, 
 		addrPtr := args[0].I32()
 
 		// 安全检查 - 确保memory不为nil
-		if ctx.memory == nil {
+		if memory == nil {
 			fmt.Println("内存实例为空")
 			return []wasmer.Value{wasmer.NewI64(0)}, fmt.Errorf("内存实例为空")
 		}
 
 		// 获取内存大小
-		memorySize := int32(len(ctx.memory.Data()))
+		memorySize := int32(len(memory.Data()))
 
 		// 检查指针是否有效
 		if addrPtr < 0 || addrPtr+20 > memorySize {
@@ -870,13 +911,13 @@ func (ctx *vmContext) getBalanceHandler() func([]wasmer.Value) ([]wasmer.Value, 
 
 		// 读取地址
 		addrData := make([]byte, 20)
-		copy(addrData, ctx.memory.Data()[addrPtr:addrPtr+20])
+		copy(addrData, memory.Data()[addrPtr:addrPtr+20])
 
 		var addr Address
 		copy(addr[:], addrData)
 
 		// 获取余额
-		balance := state.Balances[addr]
+		balance := ctx.Balance(addr)
 		return []wasmer.Value{wasmer.NewI64(int64(balance))}, nil
 	}
 }

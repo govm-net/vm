@@ -30,23 +30,25 @@ func TestNewSimpleVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeployContract() error = %v", err)
 	}
+	ctx := svm.blockchainCtx.(*simpleBlockchainContext)
+	ctx.SetExecutionContext(contractAddr, core.Address{})
 
 	// 测试执行合约
-	result, err := svm.ExecuteContract(contractAddr, core.Address{}, "Initialize", nil)
+	result, err := svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Initialize", nil)
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
 	fmt.Printf("result: %v, type: %T\n", result, result)
 
 	// 测试执行合约
-	result, err = svm.ExecuteContract(contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
+	result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
 	fmt.Printf("result: %v, type: %T\n", result, result)
 
 	// 测试执行合约
-	result, err = svm.ExecuteContract(contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
+	result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
@@ -63,9 +65,15 @@ func TestNewSimpleVM(t *testing.T) {
 	if rst.Data == nil {
 		t.Fatalf("Data = %v, want %v", rst.Data, nil)
 	}
-	if rst.Data != nil {
-		t.Fatalf("Data = %v, want %v", rst.Data, nil)
+	if fmt.Sprintf("%v", rst.Data) != "4" {
+		t.Fatalf("Data = %v, want %v", rst.Data, "4")
 	}
-
-	t.Error(result)
+	// 测试执行合约
+	result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Panic", nil)
+	if err == nil {
+		t.Fatalf("ExecuteContract() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %v, want %v", result, nil)
+	}
 }

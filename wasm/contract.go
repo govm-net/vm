@@ -605,8 +605,14 @@ func init() {
 // - 结果指针或错误码
 //
 //export handle_contract_call
-func handle_contract_call(inputPtr, inputLen int32) int32 {
+func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 	fmt.Println("handle_contract_call", inputPtr, inputLen)
+	defer func() {
+		if r := recover(); r != nil {
+			code = ErrorCodeExecutionError
+			fmt.Println("handle_contract_call panic", r)
+		}
+	}()
 	// 读取函数名
 	inputBytes := readMemory(inputPtr, inputLen)
 	var input types.HandleContractCallParams

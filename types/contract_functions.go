@@ -130,6 +130,8 @@ type HandleContractCallParams struct {
 
 // Context 是合约与区块链环境交互的主要接口
 type BlockchainContext interface {
+	WithTransaction(txHash core.Hash) BlockchainContext
+
 	// 区块链信息相关
 	BlockHeight() uint64        // 获取当前区块高度
 	BlockTime() int64           // 获取当前区块时间戳
@@ -142,6 +144,7 @@ type BlockchainContext interface {
 
 	// 对象存储相关 - 基础状态操作使用panic而非返回error
 	CreateObject(contract Address) (VMObject, error)                      // 创建新对象
+	CreateObjectWithID(contract Address, id ObjectID) (VMObject, error)   // 创建新对象
 	GetObject(contract Address, id ObjectID) (VMObject, error)            // 获取指定对象
 	GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // 按所有者获取对象
 	DeleteObject(contract Address, id ObjectID) error                     // 删除对象
