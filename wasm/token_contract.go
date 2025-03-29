@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/govm-net/vm/core"
@@ -371,4 +372,20 @@ func setBalance(ctx *Context, owner Address, amount uint64) error {
 	}
 
 	return nil
+}
+
+// 示例合约函数处理器 - 实际项目中应根据需求实现
+func handleTransfer(ctx *Context, params []byte) (interface{}, error) {
+	// 解析参数
+	var transferParams struct {
+		To     Address `json:"to"`
+		Amount uint64  `json:"amount"`
+	}
+
+	if err := json.Unmarshal(params, &transferParams); err != nil {
+		return nil, fmt.Errorf("invalid transfer parameters: %w", err)
+	}
+
+	// 执行转账
+	return Transfer(ctx, transferParams.To, transferParams.Amount), nil
 }

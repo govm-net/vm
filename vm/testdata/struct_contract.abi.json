@@ -1,0 +1,54 @@
+{
+    "package_name": "testcontract",
+    "functions": [
+        {
+            "name": "ProcessUser",
+            "inputs": [
+                {
+                    "name": "user",
+                    "type": "*User"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "CreateOrder",
+            "inputs": [
+                {
+                    "name": "order",
+                    "type": "*Order"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "HandleExternal",
+            "inputs": [
+                {
+                    "name": "data",
+                    "type": "*ExternalStruct"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        }
+    ],
+    "events": []
+} 

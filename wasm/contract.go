@@ -66,6 +66,13 @@ var _ core.Object = &Object{}
 func init() {
 	hostBuffer = make([]byte, HostBufferSize)
 	hostBufferPtr = int32(uintptr(unsafe.Pointer(&hostBuffer[0])))
+
+	// 限制只使用一个协程
+	runtime.GOMAXPROCS(1)
+
+	// 注册合约中的函数
+	registerContractFunction("Transfer", handleTransfer)
+	// 其他函数注册可以添加在这里
 }
 
 //go:wasmimport env call_host_set
@@ -99,6 +106,9 @@ func get_buffer_address() int32 {
 func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, errCode int32) {
 	var argPtr int32 = 0
 	var argLen int32 = 0
+	if len(data) > int(HostBufferSize) {
+		panic(fmt.Sprintf("data length %d is too long, max is %d", len(data), HostBufferSize))
+	}
 
 	fmt.Println("[wasm]--callHost", funcID, string(data))
 	if len(data) > 0 {
@@ -161,7 +171,7 @@ func readMemory(ptr, size int32) []byte {
 }
 
 // 将数据写入内存
-func any2bytes(data interface{}) (bytes []byte, err error) {
+func any2bytes(data any) (bytes []byte, err error) {
 	switch v := data.(type) {
 	case string:
 		bytes = []byte(v)
@@ -178,7 +188,7 @@ func any2bytes(data interface{}) (bytes []byte, err error) {
 }
 
 // 将数据写入内存
-func writeToMemory(data interface{}) (ptr int32, size int32, err error) {
+func writeToMemory(data any) (ptr int32, size int32, err error) {
 	bytes, err := any2bytes(data)
 	if err != nil {
 		return 0, 0, err
@@ -276,7 +286,7 @@ func (c *Context) Transfer(to Address, amount uint64) error {
 }
 
 // Call 调用另一个合约的函数
-func (c *Context) Call(contract Address, function string, args ...interface{}) ([]byte, error) {
+func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
 	// 构造调用参数
 	callData := types.CallParams{
 		Contract: contract,
@@ -381,7 +391,7 @@ func (c *Context) DeleteObject(id ObjectID) {
 	request.Contract = c.ContractAddress()
 	request.ID = id
 
-	// 将对象ID序列化
+	// 序列化
 	bytes, err := any2bytes(request)
 	if err != nil {
 		panic(fmt.Sprintf("failed to serialize object ID: %v", err))
@@ -464,7 +474,7 @@ func (o *Object) SetOwner(owner Address) {
 }
 
 // Get 获取对象字段的值
-func (o *Object) Get(field string, value interface{}) error {
+func (o *Object) Get(field string, value any) error {
 	// 构造参数
 	getData := types.GetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
@@ -500,7 +510,7 @@ func (o *Object) Get(field string, value interface{}) error {
 }
 
 // Set 设置对象字段的值
-func (o *Object) Set(field string, value interface{}) error {
+func (o *Object) Set(field string, value any) error {
 	// 构造参数
 	request := types.SetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
@@ -578,7 +588,7 @@ const (
 var lastErrorMessage string
 
 // 合约函数处理器类型
-type ContractFunctionHandler func(ctx *Context, params []byte) (interface{}, error)
+type ContractFunctionHandler func(ctx *Context, params []byte) (any, error)
 
 // 合约函数处理表，将在初始化时填充
 var contractFunctions = map[string]ContractFunctionHandler{}
@@ -586,16 +596,6 @@ var contractFunctions = map[string]ContractFunctionHandler{}
 // 合约函数注册器，用于将合约函数处理器添加到分发表中
 func registerContractFunction(name string, handler ContractFunctionHandler) {
 	contractFunctions[name] = handler
-}
-
-// 初始化处理表
-func init() {
-	// 限制只使用一个协程
-	runtime.GOMAXPROCS(1)
-
-	// 注册合约中的函数
-	registerContractFunction("Transfer", handleTransfer)
-	// 其他函数注册可以添加在这里
 }
 
 // 统一合约入口函数
@@ -712,38 +712,6 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 
 	// 直接返回结果指针（如果缓冲区不可用）
 	return resultPtr
-}
-
-// 示例合约函数处理器 - 实际项目中应根据需求实现
-func handleTransfer(ctx *Context, params []byte) (interface{}, error) {
-	// 解析参数
-	var transferParams struct {
-		To     Address `json:"to"`
-		Amount uint64  `json:"amount"`
-	}
-
-	if err := json.Unmarshal(params, &transferParams); err != nil {
-		return nil, fmt.Errorf("invalid transfer parameters: %w", err)
-	}
-
-	// 执行转账
-	success := Transfer(ctx, transferParams.To, transferParams.Amount)
-	if !success {
-		return nil, fmt.Errorf("transfer failed")
-	}
-
-	// 返回成功结果
-	return map[string]interface{}{
-		"status": "success",
-		"to":     transferParams.To,
-		"amount": transferParams.Amount,
-	}, nil
-}
-
-//export hello
-func hello() int32 {
-	fmt.Println("hello world")
-	return 100
 }
 
 // WebAssembly 要求 main 函数
