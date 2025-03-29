@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/govm-net/vm/core"
@@ -152,11 +153,8 @@ func readMemory(ptr, size int32) []byte {
 	data := make([]byte, size)
 
 	// 从指定位置读取数据
-	src := unsafe.Pointer(uintptr(ptr))
-
-	// 使用安全的复制方式
 	for i := int32(0); i < size; i++ {
-		data[i] = *(*byte)(unsafe.Pointer(uintptr(src) + uintptr(i)))
+		data[i] = *(*byte)(unsafe.Pointer(uintptr(ptr) + uintptr(i)))
 	}
 
 	return data
@@ -572,6 +570,8 @@ const (
 	ErrorCodeInvalidParams int32 = -2
 	// 执行错误
 	ErrorCodeExecutionError int32 = -3
+	// 执行错误
+	ErrorCodeExecutionPanic int32 = -4
 )
 
 // 全局错误消息
@@ -590,6 +590,9 @@ func registerContractFunction(name string, handler ContractFunctionHandler) {
 
 // 初始化处理表
 func init() {
+	// 限制只使用一个协程
+	runtime.GOMAXPROCS(1)
+
 	// 注册合约中的函数
 	registerContractFunction("Transfer", handleTransfer)
 	// 其他函数注册可以添加在这里
@@ -609,8 +612,8 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 	fmt.Println("handle_contract_call", inputPtr, inputLen)
 	defer func() {
 		if r := recover(); r != nil {
-			code = ErrorCodeExecutionError
-			fmt.Println("handle_contract_call panic", r)
+			fmt.Println("handle_contract_call panic")
+			code = ErrorCodeExecutionPanic
 		}
 	}()
 	// 读取函数名

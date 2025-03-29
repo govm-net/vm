@@ -50,5 +50,12 @@ func TestNewWazeroVM(t *testing.T) {
 	}
 	fmt.Printf("result: %v, type: %T\n", result, result)
 
+	result, err = svm.ExecuteContract(contractAddr, core.Address{}, "Panic", nil)
+	if err == nil {
+		t.Fatalf("ExecuteContract() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %v, want %v", result, nil)
+	}
 	t.Error(result)
 }

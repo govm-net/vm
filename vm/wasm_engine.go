@@ -133,7 +133,9 @@ func (e *WasmEngine) LoadWasmModule(contractAddr core.Address) ([]byte, error) {
 // CreateWasmInstanceWithImports 创建WebAssembly实例并设置导入对象
 func (e *WasmEngine) CreateWasmInstanceWithImports(ctx context.Context, wasmCode []byte) (*wasmer.Instance, error) {
 	// 创建WASM引擎和存储
-	engine := wasmer.NewEngine()
+	config := wasmer.NewConfig()
+	config.UseLLVMCompiler()
+	engine := wasmer.NewEngineWithConfig(config)
 	store := wasmer.NewStore(engine)
 
 	// 编译WebAssembly模块
@@ -216,7 +218,7 @@ func (e *WasmEngine) CreateWasmInstanceWithImports(ctx context.Context, wasmCode
 }
 
 // callHostSetHandler 处理修改区块链状态的宿主函数调用
-func (e *WasmEngine) callHostSetHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (e *WasmEngine) callHostSetHandler(context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		if len(args) != 4 {
 			return []wasmer.Value{wasmer.NewI32(0)}, nil
@@ -285,14 +287,14 @@ func (e *WasmEngine) callHostGetBufferHandler(ctx context.Context) func([]wasmer
 }
 
 // getBlockHeightHandler 获取区块高度处理函数
-func (e *WasmEngine) getBlockHeightHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (e *WasmEngine) getBlockHeightHandler(context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		return []wasmer.Value{wasmer.NewI64(int64(e.state.CurrentBlock))}, nil
 	}
 }
 
 // getBlockTimeHandler 获取区块时间处理函数
-func (e *WasmEngine) getBlockTimeHandler(ctx context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
+func (e *WasmEngine) getBlockTimeHandler(context.Context) func([]wasmer.Value) ([]wasmer.Value, error) {
 	return func(args []wasmer.Value) ([]wasmer.Value, error) {
 		return []wasmer.Value{wasmer.NewI64(e.state.CurrentTime)}, nil
 	}

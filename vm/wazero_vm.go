@@ -530,7 +530,7 @@ func (o *wazeroVmObject) Set(field string, value interface{}) error {
 }
 
 // 宿主函数处理器
-func (ctx *wazeroContext) handleHostSet(m api.Module, funcID uint32, argData []byte) int32 {
+func (ctx *wazeroContext) handleHostSet(_ api.Module, funcID uint32, argData []byte) int32 {
 	// 根据函数ID处理不同的操作
 	switch types.WasmFunctionID(funcID) {
 	case types.FuncTransfer:
