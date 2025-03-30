@@ -2,6 +2,9 @@ package vm
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -13,11 +16,43 @@ type HandlerGenerator struct {
 	abi *ABI
 }
 
+var EnableFormatAfterGenerate = true
+
 // NewHandlerGenerator creates a new handler generator
 func NewHandlerGenerator(abi *ABI) *HandlerGenerator {
 	return &HandlerGenerator{
 		abi: abi,
 	}
+}
+
+// format formats the generated code using gofmt
+func format(code string) (string, error) {
+	// 创建临时目录
+	tmpDir, err := os.MkdirTemp("", "vm-handler-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// 创建临时文件
+	tmpFile := filepath.Join(tmpDir, "handler.go")
+	if err := os.WriteFile(tmpFile, []byte(code), 0644); err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	// 运行 gofmt
+	cmd := exec.Command("gofmt", "-s", "-w", tmpFile)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("gofmt failed: %s: %w", string(output), err)
+	}
+
+	// 读取格式化后的代码
+	formattedCode, err := os.ReadFile(tmpFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read formatted code: %w", err)
+	}
+
+	return string(formattedCode), nil
 }
 
 // GenerateHandlers generates handler functions for all exported functions
@@ -137,5 +172,16 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 // GenerateHandlerFile generates a complete handler file
 func GenerateHandlerFile(abi *ABI) (string, error) {
 	generator := NewHandlerGenerator(abi)
-	return generator.GenerateHandlers(), nil
+	code := generator.GenerateHandlers()
+	if !EnableFormatAfterGenerate {
+		return code, nil
+	}
+
+	// 格式化代码
+	formattedCode, err := format(code)
+	if err != nil {
+		return "", fmt.Errorf("failed to format code: %w", err)
+	}
+
+	return formattedCode, nil
 }

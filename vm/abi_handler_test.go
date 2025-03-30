@@ -1,14 +1,11 @@
 package vm
 
 import (
-	"embed"
+	_ "embed"
 	"encoding/json"
 	"strings"
 	"testing"
 )
-
-//go:embed testdata/*.go testdata/*.json
-var abiTestContracts embed.FS
 
 //go:embed testdata/struct_contract.handlers.go
 var structContractHandlers []byte

@@ -8,4 +8,4 @@ require github.com/wasmerio/wasmer-go v1.0.4
 
 require github.com/tetratelabs/wazero v1.9.0
 
-require golang.org/x/text v0.23.0 // indirect
+require golang.org/x/text v0.23.0
