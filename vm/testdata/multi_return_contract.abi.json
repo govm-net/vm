@@ -1,0 +1,94 @@
+{
+    "package_name": "testcontract",
+    "functions": [
+        {
+            "name": "GetUserInfo",
+            "inputs": [
+                {
+                    "name": "ctx",
+                    "type": "core.Context"
+                },
+                {
+                    "name": "id",
+                    "type": "string"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "string"
+                },
+                {
+                    "name": "",
+                    "type": "int"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "CreateOrderWithDetails",
+            "inputs": [
+                {
+                    "name": "ctx",
+                    "type": "core.Context"
+                },
+                {
+                    "name": "userID",
+                    "type": "string"
+                },
+                {
+                    "name": "amount",
+                    "type": "float64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "*Order"
+                },
+                {
+                    "name": "",
+                    "type": "string"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "ProcessUserAndOrder",
+            "inputs": [
+                {
+                    "name": "ctx",
+                    "type": "core.Context"
+                },
+                {
+                    "name": "user",
+                    "type": "*User"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "*User"
+                },
+                {
+                    "name": "",
+                    "type": "*Order"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        }
+    ],
+    "events": []
+} 
