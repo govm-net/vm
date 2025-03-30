@@ -3,6 +3,7 @@ package vm
 import (
 	_ "embed"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,22 @@ var multiReturnContractABI []byte
 
 //go:embed testdata/multi_return_contract.handlers.go
 var multiReturnContractHandlers []byte
+
+// 比较两个代码字符串，忽略格式差异
+func compareCode(got, expected string) bool {
+	// 移除所有空白字符
+	got = strings.ReplaceAll(got, " ", "")
+	got = strings.ReplaceAll(got, "\t", "")
+	got = strings.ReplaceAll(got, "\n", "")
+	got = strings.ReplaceAll(got, "\r", "")
+
+	expected = strings.ReplaceAll(expected, " ", "")
+	expected = strings.ReplaceAll(expected, "\t", "")
+	expected = strings.ReplaceAll(expected, "\n", "")
+	expected = strings.ReplaceAll(expected, "\r", "")
+
+	return got == expected
+}
 
 func TestGenerateHandlerFile(t *testing.T) {
 	// 创建一个测试用的 ABI
@@ -53,7 +70,7 @@ func TestGenerateHandlerFile(t *testing.T) {
 	}
 
 	// 验证生成的代码
-	if string(structContractHandlers) != string(code) {
+	if !compareCode(string(structContractHandlers), string(code)) {
 		t.Errorf("Generated code does not match expected:\nGot:\n%s\nExpected:\n%s", code, structContractHandlers)
 	}
 }
@@ -154,7 +171,7 @@ func TestGenerateHandlerFileWithMultipleReturns(t *testing.T) {
 
 	// 验证生成的代码
 	expectedCode := string(multiReturnContractHandlers)
-	if generatedCode != expectedCode {
+	if !compareCode(generatedCode, expectedCode) {
 		t.Errorf("Generated code does not match expected code:\nExpected:\n%s\nGot:\n%s",
 			expectedCode, generatedCode)
 	}

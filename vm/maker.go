@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"plugin"
 	"strings"
 
 	"github.com/govm-net/vm/api"
@@ -22,6 +21,9 @@ type Maker struct {
 }
 
 var VM_IMPORT_PATH = "./"
+
+// var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "-opt", "z", "-no-debug", "-gc", "leaking", "./"}
+var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "./"}
 
 // unique removes duplicates from a string slice
 func unique(slice []string) []string {
@@ -51,7 +53,8 @@ var RestrictedCommentPrefixes []string = []string{
 	"//runtime",
 	"//internal",
 	"//vendor",
-	// "//go:build", // exist go:, no need
+	// exist "go:"", ignore below items
+	// "//go:build",
 	// "//go:generate",
 	// "//go:linkname",
 	// "//go:nosplit",
@@ -114,7 +117,7 @@ func (m *Maker) ValidateContract(code []byte) error {
 	}
 
 	// Validate no malicious commands in comments
-	if err := m.validateNoMaliciousCommands(code); err != nil {
+	if err := m.validateNoMaliciousCommands(file); err != nil {
 		return err
 	}
 
@@ -263,73 +266,31 @@ func (v *restrictedKeywordVisitor) Visit(node ast.Node) ast.Visitor {
 }
 
 // validateNoMaliciousCommands ensures the contract doesn't contain malicious commands in comments.
-func (m *Maker) validateNoMaliciousCommands(code []byte) error {
-	// 将代码转换为字符串
-	codeStr := string(code)
+func (m *Maker) validateNoMaliciousCommands(file *ast.File) error {
+	fset := token.NewFileSet()
+	// 检查所有注释
+	for _, commentGroup := range file.Comments {
+		for _, comment := range commentGroup.List {
+			// 移除注释标记
+			commentText := strings.TrimPrefix(comment.Text, "//")
+			commentText = strings.TrimPrefix(commentText, "/*")
+			commentText = strings.TrimSuffix(commentText, "*/")
+			commentText = strings.TrimSpace(commentText)
 
-	// 检查每一行
-	lines := strings.Split(codeStr, "\n")
-	for i, line := range lines {
-		// 跳过空行
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		// 检查单行注释
-		if strings.HasPrefix(strings.TrimSpace(line), "//") {
-			comment := strings.TrimSpace(strings.TrimPrefix(line, "//"))
-			for _, prefix := range RestrictedCommentPrefixes {
-				if strings.HasPrefix(strings.ToLower(comment), strings.ToLower(prefix)) {
-					return fmt.Errorf("restricted comment prefix '%s' found at line %d", prefix, i+1)
+			// 检查每一行
+			for _, line := range strings.Split(commentText, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
 				}
-			}
-		}
-
-		// 检查多行注释的开始
-		if strings.Contains(line, "/*") {
-			// 查找多行注释的结束
-			commentEnd := strings.Index(line, "*/")
-			if commentEnd == -1 {
-				// 多行注释跨越多行，继续检查后续行
-				for j := i + 1; j < len(lines); j++ {
-					commentEnd = strings.Index(lines[j], "*/")
-					if commentEnd != -1 {
-						// 检查多行注释的内容
-						comment := strings.Join(lines[i:j+1], "\n")
-						// 移除注释标记
-						comment = strings.TrimPrefix(comment, "/*")
-						comment = strings.TrimSuffix(comment, "*/")
-						// 按行检查
-						commentLines := strings.Split(comment, "\n")
-						for k, commentLine := range commentLines {
-							commentLine = strings.TrimSpace(commentLine)
-							if commentLine == "" {
-								continue
-							}
-							for _, prefix := range RestrictedCommentPrefixes {
-								if strings.HasPrefix(strings.ToLower(commentLine), strings.ToLower(prefix)) {
-									return fmt.Errorf("restricted comment prefix '%s' found in multi-line comment at line %d", prefix, i+k+1)
-								}
-							}
-						}
-						break
-					}
-				}
-			} else {
-				// 多行注释在同一行
-				comment := line[strings.Index(line, "/*")+2 : commentEnd]
-				comment = strings.TrimSpace(comment)
-				if comment != "" {
-					for _, prefix := range RestrictedCommentPrefixes {
-						if strings.HasPrefix(strings.ToLower(comment), strings.ToLower(prefix)) {
-							return fmt.Errorf("restricted comment prefix '%s' found in multi-line comment at line %d", prefix, i+1)
-						}
+				for _, prefix := range RestrictedCommentPrefixes {
+					if strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
+						return fmt.Errorf("restricted comment prefix '%s' found at line %d", prefix, fset.Position(comment.Pos()).Line)
 					}
 				}
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -351,15 +312,13 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 
 	// 2. 创建临时目录
-	// tmpDir, err := os.MkdirTemp("", "vm-contract-*")
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	// }
-	// defer os.RemoveAll(tmpDir)
-	tmpDir := "./tmp"
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	tmpDir, err := os.MkdirTemp("", "vm-contract-*")
+	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
+	defer os.RemoveAll(tmpDir)
+	// tmpDir := "./tmp"
+	// os.MkdirAll(tmpDir, 0755)
 
 	// 3. 将代码放到临时文件夹，并修改包名为main
 	contractCode := string(code)
@@ -433,7 +392,7 @@ replace github.com/govm-net/vm => %s
 	}
 
 	// 6. 使用tinygo编译
-	cmd = exec.Command("tinygo", "build", "-o", "contract.wasm", "-target", "wasi", "./")
+	cmd = exec.Command("tinygo", BuildParams...)
 	cmd.Dir = tmpDir
 	output, err = cmd.CombinedOutput()
 	if err != nil {
@@ -450,209 +409,77 @@ replace github.com/govm-net/vm => %s
 	return wasmCode, nil
 }
 
-// InstantiateContract creates a new instance of the compiled contract.
-// This method dynamically loads and instantiates the contract based on compiled code.
-func (m *Maker) InstantiateContract(compiledCode []byte) (interface{}, error) {
-	// 首先解析代码中的包名和结构体名称
-	packageName, contractName, err := m.extractContractInfo(compiledCode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract contract info: %w", err)
+// FunctionInfo 函数信息
+type FunctionInfo struct {
+	Name string
+	Args []struct {
+		Name string
+		Type string
 	}
-
-	// 尝试使用动态加载方法
-	// 设置一个环境标志以控制是否允许动态加载
-	useDynamicLoading := true
-
-	// 可以根据运行时的操作系统、环境变量等决定是否启用动态加载
-	if useDynamicLoading {
-		// 尝试动态编译和加载合约
-		instance, err := m.dynamicallyLoadContract(packageName, contractName, compiledCode)
-		if err == nil {
-			return instance, nil
-		}
-		// 如果动态加载失败，记录错误并尝试回退方法
-		fmt.Printf("Dynamic loading failed: %v. Falling back to template method.\n", err)
-	}
-
-	// 如果动态加载不可用或者失败，使用预编译模板方法
-	// 首先尝试使用反射创建实例
-	instance, err := m.createContractByReflection(packageName, contractName)
-	if err == nil {
-		return instance, nil
-	}
-
-	// 如果反射方法也失败，则使用简单的匹配方法
-	return m.createContractInstance(packageName, contractName)
 }
 
-// extractContractInfo 从代码中提取包名和合约结构体名称
-func (m *Maker) extractContractInfo(code []byte) (packageName, contractName string, err error) {
-	// 解析Go代码
+// ParseABI 解析合约代码获取函数信息
+func (m *Maker) ParseABI(code []byte) (map[string]FunctionInfo, error) {
+	// 创建文件集
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", code, parser.AllErrors)
+
+	// 解析Go代码
+	file, err := parser.ParseFile(fset, "", code, parser.ParseComments)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to parse contract: %w", err)
+		return nil, fmt.Errorf("failed to parse contract code: %w", err)
 	}
 
-	// 获取包名
-	packageName = file.Name.Name
-	if packageName == "" {
-		return "", "", errors.New("could not determine package name")
-	}
+	// 存储函数信息
+	abi := make(map[string]FunctionInfo)
 
-	// 查找第一个导出的结构体定义作为合约类型
+	// 遍历所有声明
 	for _, decl := range file.Decls {
-		genDecl, ok := decl.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.TYPE {
-			continue
-		}
-
-		for _, spec := range genDecl.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok || !typeSpec.Name.IsExported() {
-				continue
-			}
-
-			// 检查是否为结构体
-			if _, ok := typeSpec.Type.(*ast.StructType); ok {
-				return packageName, typeSpec.Name.Name, nil
-			}
-		}
-	}
-
-	// 如果没有找到导出的结构体，查找可能包含receiver参数的函数
-	// 分析函数声明，找出可能的合约类型
-	typeMap := make(map[string]int)
-	for _, decl := range file.Decls {
+		// 只处理函数声明
 		funcDecl, ok := decl.(*ast.FuncDecl)
-		if !ok || !funcDecl.Name.IsExported() || funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
+		if !ok {
 			continue
 		}
 
-		// 获取receiver类型
-		var typeName string
-		switch t := funcDecl.Recv.List[0].Type.(type) {
-		case *ast.StarExpr: // 指针类型 (*Type)
-			if ident, ok := t.X.(*ast.Ident); ok {
-				typeName = ident.Name
+		// 跳过未导出的函数
+		if !funcDecl.Name.IsExported() {
+			continue
+		}
+
+		// 创建函数信息
+		info := FunctionInfo{
+			Name: funcDecl.Name.Name,
+		}
+
+		// 处理函数参数
+		if funcDecl.Type.Params != nil {
+			for _, field := range funcDecl.Type.Params.List {
+				// 获取参数类型
+				typeExpr := field.Type
+				typeStr := ""
+				switch t := typeExpr.(type) {
+				case *ast.Ident:
+					typeStr = t.Name
+				case *ast.ArrayType:
+					if ident, ok := t.Elt.(*ast.Ident); ok {
+						typeStr = "[]" + ident.Name
+					}
+				}
+
+				// 处理每个参数名
+				for _, name := range field.Names {
+					info.Args = append(info.Args, struct {
+						Name string
+						Type string
+					}{
+						Name: name.Name,
+						Type: typeStr,
+					})
+				}
 			}
-		case *ast.Ident: // 非指针类型 (Type)
-			typeName = t.Name
 		}
 
-		if typeName != "" {
-			typeMap[typeName]++
-		}
+		abi[info.Name] = info
 	}
 
-	// 找出出现次数最多的类型作为合约类型
-	var maxCount int
-	for name, count := range typeMap {
-		if count > maxCount {
-			maxCount = count
-			contractName = name
-		}
-	}
-
-	if contractName == "" {
-		return "", "", errors.New("could not determine contract type")
-	}
-
-	return packageName, contractName, nil
-}
-
-// createContractInstance 创建合约实例
-func (m *Maker) createContractInstance(packageName, contractName string) (interface{}, error) {
-	// 在实际实现中，这里应该动态加载已编译的代码
-	// 由于我们现在没有动态编译机制，返回测试用的虚拟合约
-	// 不同合约类型可以通过包名和合约名区分
-
-	// 为特定合约类型返回自定义实现
-	return nil, nil
-}
-
-// dynamicallyLoadContract 在运行时动态编译和加载合约代码
-func (m *Maker) dynamicallyLoadContract(packageName, contractName string, code []byte) (interface{}, error) {
-	// 注意：此功能需要在运行时环境中支持Go plugin功能
-	// 目前Go plugin仅在Linux、FreeBSD和macOS上受支持
-
-	// 创建一个临时目录来构建插件
-	tempDir, err := os.MkdirTemp("", "govm-contract-")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// 创建必要的目录结构
-	srcDir := filepath.Join(tempDir, "src")
-	if err := os.MkdirAll(srcDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create source directory: %w", err)
-	}
-
-	// 写入合约源代码
-	contractFile := filepath.Join(srcDir, "contract.go")
-	if err := os.WriteFile(contractFile, code, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write contract code: %w", err)
-	}
-
-	// 创建一个包装文件，用于导出合约实例
-	wrapperCode := fmt.Sprintf(`
-package main
-
-import (
-	"github.com/govm-net/vm/core"
-	// 其他必要的导入
-)
-
-// 原始合约代码在contract.go中
-
-// 必须导出的符号
-var Contract interface{}
-
-// init函数在插件加载时自动运行
-func init() {
-	// 创建一个合约实例并将其赋值给导出的Contract变量
-	Contract = &%s{}
-}
-`, contractName)
-
-	wrapperFile := filepath.Join(srcDir, "wrapper.go")
-	if err := os.WriteFile(wrapperFile, []byte(wrapperCode), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write wrapper code: %w", err)
-	}
-
-	// 编译插件
-	pluginFile := filepath.Join(tempDir, "contract.so")
-	cmd := exec.Command("go", "build", "-buildmode=plugin", "-o", pluginFile, srcDir)
-	cmd.Env = append(os.Environ(), "GOPATH="+tempDir)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile plugin: %w\nOutput: %s", err, output)
-	}
-
-	// 加载插件
-	p, err := plugin.Open(pluginFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open plugin: %w", err)
-	}
-
-	// 获取Contract变量
-	symbol, err := p.Lookup("Contract")
-	if err != nil {
-		return nil, fmt.Errorf("failed to find Contract symbol: %w", err)
-	}
-
-	// 返回合约实例
-	contract, ok := symbol.(*interface{})
-	if !ok {
-		return nil, fmt.Errorf("Contract symbol is not of the expected type")
-	}
-
-	return *contract, nil
-}
-
-// 使用reflection创建合约实例
-func (m *Maker) createContractByReflection(packageName, contractName string) (interface{}, error) {
-	// 获取合约类型
-	return nil, nil
+	return abi, nil
 }

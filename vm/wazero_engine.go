@@ -225,7 +225,15 @@ func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr ty
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	if len(result) == 0 {
+		return nil, nil
+	}
+	var runResult types.ExecutionResult
+	err = json.Unmarshal(result, &runResult)
+	if err != nil {
+		return nil, fmt.Errorf("反序列化失败: %w", err)
+	}
+	return runResult.Data, nil
 }
 
 // generateContractAddress 生成合约地址
@@ -238,7 +246,7 @@ func (vm *WazeroVM) generateContractAddress(code []byte, _ types.Address) types.
 
 // callWasmFunction 调用WASM函数
 func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Module, functionName string, params []byte) ([]byte, error) {
-	fmt.Printf("调用合约函数:%s, %v\n", functionName, params)
+	fmt.Printf("调用合约函数:%s, %v\n", functionName, string(params))
 
 	// 检查是否导出了allocate和deallocate函数
 	allocate := module.ExportedFunction("allocate")
@@ -279,7 +287,10 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	}
 
 	var out []byte
-	resultLen := uint32(result[0])
+	resultLen := int32(result[0])
+	// if resultLen > int32(types.HostBufferSize) {
+	// 	resultLen = resultLen - int32(types.HostBufferSize)
+	// }
 	if resultLen > 0 {
 		getBufferAddress := module.ExportedFunction("get_buffer_address")
 		if getBufferAddress == nil {
@@ -293,9 +304,9 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 		bufferPtr := uint32(result[0])
 
 		// 读取结果数据
-		data, ok := module.Memory().Read(bufferPtr, resultLen)
+		data, ok := module.Memory().Read(bufferPtr, uint32(resultLen))
 		if !ok {
-			return nil, fmt.Errorf("读取内存失败")
+			return nil, fmt.Errorf("读取内存失败:%d, len:%d", bufferPtr, resultLen)
 		}
 		out = data
 	}
@@ -519,4 +530,14 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 	default:
 		return -1
 	}
+}
+
+// Close 关闭虚拟机
+func (vm *WazeroVM) Close() error {
+	if vm.envModule != nil {
+		if err := vm.envModule.Close(vm.ctx); err != nil {
+			return fmt.Errorf("failed to close env module: %w", err)
+		}
+	}
+	return nil
 }

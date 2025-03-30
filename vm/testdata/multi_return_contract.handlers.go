@@ -22,11 +22,11 @@ func handleGetUserInfo(ctx core.Context, params []byte) (any, error) {
 	result0, result1, result2 := GetUserInfo(ctx, args.Id)
 
 	// 处理返回值
-	return map[string]any{
-		"result0": result0,
-		"result1": result1,
-		"result2": result2,
-	}, nil
+	results := make([]any, 0)
+	results = append(results, result0)
+	results = append(results, result1)
+	results = append(results, result2)
+	return results, nil
 }
 
 type CreateOrderWithDetailsParams struct {
@@ -45,11 +45,11 @@ func handleCreateOrderWithDetails(ctx core.Context, params []byte) (any, error) 
 	result0, result1, result2 := CreateOrderWithDetails(ctx, args.Userid, args.Amount)
 
 	// 处理返回值
-	return map[string]any{
-		"result0": result0,
-		"result1": result1,
-		"result2": result2,
-	}, nil
+	results := make([]any, 0)
+	results = append(results, result0)
+	results = append(results, result1)
+	results = append(results, result2)
+	return results, nil
 }
 
 type ProcessUserAndOrderParams struct {
@@ -67,9 +67,9 @@ func handleProcessUserAndOrder(ctx core.Context, params []byte) (any, error) {
 	result0, result1, result2 := ProcessUserAndOrder(ctx, args.User)
 
 	// 处理返回值
-	return map[string]any{
-		"result0": result0,
-		"result1": result1,
-		"result2": result2,
-	}, nil
+	results := make([]any, 0)
+	results = append(results, result0)
+	results = append(results, result1)
+	results = append(results, result2)
+	return results, nil
 }

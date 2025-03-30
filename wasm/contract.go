@@ -620,9 +620,11 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 	inputBytes := readMemory(inputPtr, inputLen)
 	var input types.HandleContractCallParams
 	if err := json.Unmarshal(inputBytes, &input); err != nil {
-		return ErrorCodeExecutionError
+		return ErrorCodeInvalidParams
 	}
 	functionName := input.Function
+
+	fmt.Println("handle_contract_call functionName", functionName, string(input.Args))
 
 	// 读取参数
 	paramsBytes := input.Args

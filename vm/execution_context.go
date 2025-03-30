@@ -22,8 +22,8 @@ type defaultBlockchainContext struct {
 
 	// 虚拟机对象存储
 	objects        map[core.ObjectID]map[string]any
-	objectOwner    map[core.ObjectID]types.Address
-	objectContract map[core.ObjectID]types.Address
+	objectOwner    map[core.ObjectID]core.Address
+	objectContract map[core.ObjectID]core.Address
 
 	// 当前执行上下文
 	contractAddr types.Address
@@ -37,10 +37,10 @@ func NewDefaultBlockchainContext() *defaultBlockchainContext {
 	return &defaultBlockchainContext{
 		blockHeight:    1,
 		blockTime:      2,
-		balances:       make(map[Address]uint64),
+		balances:       make(map[core.Address]uint64),
 		objects:        make(map[core.ObjectID]map[string]any),
-		objectOwner:    make(map[core.ObjectID]Address),
-		objectContract: make(map[core.ObjectID]Address),
+		objectOwner:    make(map[core.ObjectID]core.Address),
+		objectContract: make(map[core.ObjectID]core.Address),
 	}
 }
 

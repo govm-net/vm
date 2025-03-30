@@ -2,6 +2,8 @@ package vm
 
 import (
 	"embed"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/govm-net/vm/api"
@@ -98,35 +100,6 @@ func TestCompileContract(t *testing.T) {
 	}
 }
 
-func TestInstantiateContract(t *testing.T) {
-	// Create a maker with default config
-	config := api.ContractConfig{
-		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: []string{
-			"github.com/govm-net/vm/core",
-		},
-	}
-	maker := NewMaker(config)
-
-	// Read contract file
-	validContract, _ := testContracts.ReadFile("testdata/valid_contract.go")
-
-	// Compile the contract
-	compiledCode, err := maker.CompileContract(validContract)
-	if err != nil {
-		t.Fatalf("Failed to compile valid contract: %v", err)
-	}
-
-	// Instantiate the contract
-	contractInstance, err := maker.InstantiateContract(compiledCode)
-	if err != nil {
-		t.Errorf("Failed to instantiate contract: %v", err)
-	}
-	if contractInstance == nil {
-		t.Errorf("Instantiated contract should not be nil")
-	}
-}
-
 func TestValidateNoMaliciousCommands(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
@@ -206,7 +179,13 @@ func main() {}`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := maker.validateNoMaliciousCommands([]byte(tt.code))
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "", tt.code, parser.ParseComments)
+			if err != nil {
+				t.Fatalf("failed to parse test code: %v", err)
+			}
+
+			err = maker.validateNoMaliciousCommands(file)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateNoMaliciousCommands() error = %v, wantErr %v", err, tt.wantErr)
 			}

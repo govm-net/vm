@@ -2,6 +2,8 @@
 // 合约开发者只需了解并使用此文件中的接口即可编写智能合约
 package core
 
+import "encoding/hex"
+
 // Address 表示区块链上的地址
 type Address [20]byte
 
@@ -9,6 +11,46 @@ type Address [20]byte
 type ObjectID [32]byte
 
 type Hash [32]byte
+
+var ZeroAddress = Address{}
+var ZeroObjectID = ObjectID{}
+var ZeroHash = Hash{}
+
+func (id ObjectID) String() string {
+	return hex.EncodeToString(id[:])
+}
+
+func IDFromString(str string) ObjectID {
+	id, err := hex.DecodeString(str)
+	if err != nil {
+		return ZeroObjectID
+	}
+	return ObjectID(id)
+}
+
+func (addr Address) String() string {
+	return hex.EncodeToString(addr[:])
+}
+
+func AddressFromString(str string) Address {
+	addr, err := hex.DecodeString(str)
+	if err != nil {
+		return ZeroAddress
+	}
+	return Address(addr)
+}
+
+func (h Hash) String() string {
+	return hex.EncodeToString(h[:])
+}
+
+func HashFromString(str string) Hash {
+	h, err := hex.DecodeString(str)
+	if err != nil {
+		return ZeroHash
+	}
+	return Hash(h)
+}
 
 // Context 是合约与区块链环境交互的主要接口
 type Context interface {
@@ -45,4 +87,17 @@ type Object interface {
 	// 字段操作
 	Get(field string, value any) error // 获取字段值
 	Set(field string, value any) error // 设置字段值
+}
+
+func Request(condition any) {
+	switch v := condition.(type) {
+	case bool:
+		if !v {
+			panic("request failed")
+		}
+	case error:
+		if v != nil {
+			panic(v)
+		}
+	}
 }

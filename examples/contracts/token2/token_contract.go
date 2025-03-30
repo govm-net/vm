@@ -1,8 +1,7 @@
 // 基于wasm包装层的简单令牌合约示例
-package main
+package token
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/govm-net/vm/core"
@@ -15,68 +14,66 @@ const (
 	TokenSymbolKey      = "symbol"       // 令牌符号
 	TokenDecimalsKey    = "decimals"     // 令牌小数位
 	TokenTotalSupplyKey = "total_supply" // 总供应量
+	TokenBalancePrefix  = "balance_"     // 余额字段前缀
 	TokenOwnerKey       = "owner"        // 令牌所有者
-
-	// 余额对象前缀
-	BalancePrefix = "balance:" // 余额对象前缀
 )
 
 // 初始化令牌合约
 func InitializeToken(ctx core.Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
 	// 获取默认Object（空ObjectID）
-	defaultObj, err := ctx.GetObject(ObjectID{})
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
 	// 存储令牌基本信息
 	err = defaultObj.Set(TokenNameKey, name)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌名称失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
 	err = defaultObj.Set(TokenSymbolKey, symbol)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌符号失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
 	err = defaultObj.Set(TokenDecimalsKey, decimals)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌小数位失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
 	err = defaultObj.Set(TokenTotalSupplyKey, totalSupply)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储总供应量失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
-	// 存储令牌所有者（部署者）
-	owner := ctx.Sender()
-	err = defaultObj.Set(TokenOwnerKey, owner)
+	// 存储令牌所有者
+	err = defaultObj.Set(TokenOwnerKey, ctx.Sender())
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("存储令牌所有者失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
-	// 创建所有者余额对象
-	err = setBalance(ctx, owner, totalSupply)
+	// 初始化所有者余额
+	err = defaultObj.Set(TokenBalancePrefix+ctx.Sender().String(), totalSupply)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("初始化所有者余额失败: %v", err))
-		return core.ObjectID{}
+		return core.ZeroObjectID
 	}
 
 	// 记录初始化事件
-	ctx.Log("token_initialize",
+	ctx.Log("initialize",
+		"id", defaultObj.ID(),
 		"name", name,
 		"symbol", symbol,
 		"decimals", decimals,
 		"total_supply", totalSupply,
-		"owner", owner)
+		"owner", ctx.Sender())
 
 	return defaultObj.ID()
 }
@@ -84,7 +81,7 @@ func InitializeToken(ctx core.Context, name string, symbol string, decimals uint
 // 获取令牌信息
 func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
 	// 获取默认Object
-	defaultObj, err := ctx.GetObject(ObjectID{})
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
 		return "", "", 0, 0
@@ -123,33 +120,47 @@ func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
 }
 
 // 获取所有者
-func GetOwner(ctx core.Context) Address {
+func GetOwner(ctx core.Context) core.Address {
 	// 获取默认Object
-	defaultObj, err := ctx.GetObject(ObjectID{})
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return ZeroAddress
+		return core.ZeroAddress
 	}
 
-	// 读取所有者地址
-	var owner Address
+	// 获取令牌所有者
+	var owner core.Address
 	err = defaultObj.Get(TokenOwnerKey, &owner)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取令牌所有者失败: %v", err))
-		return ZeroAddress
+		return core.ZeroAddress
 	}
 
 	return owner
 }
 
 // 获取账户余额
-func BalanceOf(ctx core.Context, owner Address) uint64 {
-	balance, _ := getBalance(ctx, owner)
+func BalanceOf(ctx core.Context, owner core.Address) uint64 {
+	// 获取默认Object
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		return 0
+	}
+
+	// 获取余额
+	var balance uint64
+	err = defaultObj.Get(TokenBalancePrefix+owner.String(), &balance)
+	if err != nil {
+		// 如果获取失败，返回0余额
+		return 0
+	}
+
 	return balance
 }
 
 // 转账令牌给其他地址
-func Transfer(ctx core.Context, to Address, amount uint64) bool {
+func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
 	from := ctx.Sender()
 
 	// 检查金额有效性
@@ -158,8 +169,16 @@ func Transfer(ctx core.Context, to Address, amount uint64) bool {
 		return false
 	}
 
+	// 获取默认Object
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		return false
+	}
+
 	// 获取发送者余额
-	fromBalance, err := getBalance(ctx, from)
+	var fromBalance uint64
+	err = defaultObj.Get(TokenBalancePrefix+from.String(), &fromBalance)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取发送者余额失败: %v", err))
 		return false
@@ -171,21 +190,25 @@ func Transfer(ctx core.Context, to Address, amount uint64) bool {
 		return false
 	}
 
-	// 更新发送者余额
-	err = setBalance(ctx, from, fromBalance-amount)
+	// 获取接收者余额
+	var toBalance uint64
+	err = defaultObj.Get(TokenBalancePrefix+to.String(), &toBalance)
+	if err != nil {
+		// 如果接收者没有余额记录，从0开始
+		toBalance = 0
+	}
+
+	// 更新余额
+	err = defaultObj.Set(TokenBalancePrefix+from.String(), fromBalance-amount)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("更新发送者余额失败: %v", err))
 		return false
 	}
 
-	// 获取接收者余额
-	toBalance, _ := getBalance(ctx, to)
-
-	// 更新接收者余额
-	err = setBalance(ctx, to, toBalance+amount)
+	err = defaultObj.Set(TokenBalancePrefix+to.String(), toBalance+amount)
 	if err != nil {
 		// 如果更新接收者余额失败，恢复发送者余额
-		setBalance(ctx, from, fromBalance)
+		defaultObj.Set(TokenBalancePrefix+from.String(), fromBalance)
 		ctx.Log("error", "message", fmt.Sprintf("更新接收者余额失败: %v", err))
 		return false
 	}
@@ -200,11 +223,23 @@ func Transfer(ctx core.Context, to Address, amount uint64) bool {
 }
 
 // 铸造新令牌（仅限所有者）
-func Mint(ctx core.Context, to Address, amount uint64) bool {
+func Mint(ctx core.Context, to core.Address, amount uint64) bool {
 	sender := ctx.Sender()
 
+	// 获取默认Object
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		return false
+	}
+
 	// 获取令牌所有者
-	owner := GetOwner(ctx)
+	var owner core.Address
+	err = defaultObj.Get(TokenOwnerKey, &owner)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取令牌所有者失败: %v", err))
+		return false
+	}
 
 	// 检查是否为令牌所有者
 	if sender != owner {
@@ -218,13 +253,6 @@ func Mint(ctx core.Context, to Address, amount uint64) bool {
 		return false
 	}
 
-	// 获取默认Object
-	defaultObj, err := ctx.GetObject(ObjectID{})
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return false
-	}
-
 	// 获取当前总供应量
 	var totalSupply uint64
 	err = defaultObj.Get(TokenTotalSupplyKey, &totalSupply)
@@ -234,23 +262,26 @@ func Mint(ctx core.Context, to Address, amount uint64) bool {
 	}
 
 	// 获取接收者余额
-	toBalance, _ := getBalance(ctx, to)
+	var toBalance uint64
+	err = defaultObj.Get(TokenBalancePrefix+to.String(), &toBalance)
+	if err != nil {
+		// 如果接收者没有余额记录，从0开始
+		toBalance = 0
+	}
 
-	// 更新接收者余额
-	err = setBalance(ctx, to, toBalance+amount)
+	// 更新余额和总供应量
+	err = defaultObj.Set(TokenBalancePrefix+to.String(), toBalance+amount)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("更新接收者余额失败: %v", err))
 		return false
 	}
 
-	// 更新总供应量
 	newTotalSupply := totalSupply + amount
 	err = defaultObj.Set(TokenTotalSupplyKey, newTotalSupply)
 	if err != nil {
+		// 如果更新总供应量失败，恢复接收者余额
+		defaultObj.Set(TokenBalancePrefix+to.String(), toBalance)
 		ctx.Log("error", "message", fmt.Sprintf("更新总供应量失败: %v", err))
-
-		// 回滚余额变更
-		setBalance(ctx, to, toBalance)
 		return false
 	}
 
@@ -267,6 +298,27 @@ func Mint(ctx core.Context, to Address, amount uint64) bool {
 func Burn(ctx core.Context, amount uint64) bool {
 	sender := ctx.Sender()
 
+	// 获取默认Object
+	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		return false
+	}
+
+	// 获取令牌所有者
+	var owner core.Address
+	err = defaultObj.Get(TokenOwnerKey, &owner)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("获取令牌所有者失败: %v", err))
+		return false
+	}
+
+	// 检查是否为令牌所有者
+	if sender != owner {
+		ctx.Log("error", "message", "只有令牌所有者才能销毁令牌")
+		return false
+	}
+
 	// 检查金额有效性
 	if amount == 0 {
 		ctx.Log("error", "message", "销毁金额必须大于0")
@@ -274,7 +326,8 @@ func Burn(ctx core.Context, amount uint64) bool {
 	}
 
 	// 获取发送者余额
-	senderBalance, err := getBalance(ctx, sender)
+	var senderBalance uint64
+	err = defaultObj.Get(TokenBalancePrefix+sender.String(), &senderBalance)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取发送者余额失败: %v", err))
 		return false
@@ -286,42 +339,27 @@ func Burn(ctx core.Context, amount uint64) bool {
 		return false
 	}
 
-	// 更新发送者余额
-	err = setBalance(ctx, sender, senderBalance-amount)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("更新发送者余额失败: %v", err))
-		return false
-	}
-
-	// 获取默认Object
-	defaultObj, err := ctx.GetObject(ObjectID{})
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-
-		// 回滚余额变更
-		setBalance(ctx, sender, senderBalance)
-		return false
-	}
-
 	// 获取当前总供应量
 	var totalSupply uint64
 	err = defaultObj.Get(TokenTotalSupplyKey, &totalSupply)
 	if err != nil {
 		ctx.Log("error", "message", fmt.Sprintf("获取总供应量失败: %v", err))
-
-		// 回滚余额变更
-		setBalance(ctx, sender, senderBalance)
 		return false
 	}
 
-	// 更新总供应量
+	// 更新余额和总供应量
+	err = defaultObj.Set(TokenBalancePrefix+sender.String(), senderBalance-amount)
+	if err != nil {
+		ctx.Log("error", "message", fmt.Sprintf("更新发送者余额失败: %v", err))
+		return false
+	}
+
 	newTotalSupply := totalSupply - amount
 	err = defaultObj.Set(TokenTotalSupplyKey, newTotalSupply)
 	if err != nil {
+		// 如果更新总供应量失败，恢复发送者余额
+		defaultObj.Set(TokenBalancePrefix+sender.String(), senderBalance)
 		ctx.Log("error", "message", fmt.Sprintf("更新总供应量失败: %v", err))
-
-		// 回滚余额变更
-		setBalance(ctx, sender, senderBalance)
 		return false
 	}
 
@@ -332,64 +370,4 @@ func Burn(ctx core.Context, amount uint64) bool {
 		"total_supply", newTotalSupply)
 
 	return true
-}
-
-// 辅助函数 - 获取账户余额
-func getBalance(ctx core.Context, owner Address) (uint64, error) {
-	// 尝试获取余额对象
-	obj, err := ctx.GetObjectWithOwner(owner)
-	if err != nil {
-		// 如果对象不存在，返回0余额
-		return 0, nil
-	}
-
-	// 获取余额值
-	var balance uint64
-	err = obj.Get("amount", &balance)
-	if err != nil {
-		// 如果获取失败，返回0余额
-		return 0, nil
-	}
-
-	return balance, nil
-}
-
-// 辅助函数 - 设置账户余额
-func setBalance(ctx core.Context, owner Address, amount uint64) error {
-	// 尝试获取余额对象
-	obj, err := ctx.GetObjectWithOwner(owner)
-	if err != nil {
-		// 如果对象不存在，创建新对象
-		obj = ctx.CreateObject()
-		// 设置对象所有者
-		obj.SetOwner(owner)
-	}
-
-	// 设置余额值
-	err = obj.Set("amount", amount)
-	if err != nil {
-		return fmt.Errorf("设置余额失败: %w", err)
-	}
-
-	return nil
-}
-
-func init() {
-	registerContractFunction("Transfer", handleTransfer)
-}
-
-// 示例合约函数处理器 - 实际项目中应根据需求实现
-func handleTransfer(ctx core.Context, params []byte) (interface{}, error) {
-	// 解析参数
-	var transferParams struct {
-		To     Address `json:"to"`
-		Amount uint64  `json:"amount"`
-	}
-
-	if err := json.Unmarshal(params, &transferParams); err != nil {
-		return nil, fmt.Errorf("invalid transfer parameters: %w", err)
-	}
-
-	// 执行转账
-	return Transfer(ctx, transferParams.To, transferParams.Amount), nil
 }

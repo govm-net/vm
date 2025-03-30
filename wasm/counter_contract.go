@@ -136,6 +136,7 @@ func handleIncrement(ctx core.Context, params []byte) (any, error) {
 	var incrParams struct {
 		Amount int64 `json:"amount"`
 	}
+	fmt.Printf("handleIncrement params: %s\n", string(params))
 
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &incrParams); err != nil {

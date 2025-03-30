@@ -15,15 +15,11 @@ const (
 func Initialize(ctx core.Context) int32 {
 	// 获取合约的默认Object（空ObjectID）
 	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	if err != nil {
-		return -1
-	}
+	core.Request(err)
 
 	// 初始化计数器值为0
 	err = defaultObj.Set(CounterKey, uint64(0))
-	if err != nil {
-		return -1
-	}
+	core.Request(err)
 
 	ctx.Log("initialize", "contract_address", ctx.ContractAddress())
 	return 0
@@ -33,25 +29,19 @@ func Initialize(ctx core.Context) int32 {
 func Increment(ctx core.Context, value uint64) uint64 {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	if err != nil {
-		return 0
-	}
+	core.Request(err)
 
 	// 获取当前计数器值
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
-	if err != nil {
-		return 0
-	}
+	core.Request(err)
 
 	// 增加计数器值
 	newValue := currentValue + value
 
 	// 更新计数器值
 	err = defaultObj.Set(CounterKey, newValue)
-	if err != nil {
-		return 0
-	}
+	core.Request(err)
 
 	// 记录事件
 	ctx.Log("increment",
@@ -67,16 +57,12 @@ func Increment(ctx core.Context, value uint64) uint64 {
 func GetCounter(ctx core.Context) uint64 {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	if err != nil {
-		return 0
-	}
+	core.Request(err)
 
 	// 获取当前计数器值
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
-	if err != nil {
-		return 0
-	}
+	core.Request(err)
 
 	return currentValue
 }
@@ -90,15 +76,11 @@ func Reset(ctx core.Context) {
 
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	if err != nil {
-		return
-	}
+	core.Request(err)
 
 	// 重置计数器值为0
 	err = defaultObj.Set(CounterKey, uint64(0))
-	if err != nil {
-		return
-	}
+	core.Request(err)
 
 	// 记录事件
 	ctx.Log("reset", "sender", ctx.Sender())

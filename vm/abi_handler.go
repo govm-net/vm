@@ -103,10 +103,14 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 	sb.WriteString(fmt.Sprintf("func handle%s(ctx core.Context, params []byte) (any, error) {\n", fn.Name))
 
 	// 生成参数解析代码
-	sb.WriteString(fmt.Sprintf("\tvar args %sParams\n", fn.Name))
-	sb.WriteString("\tif err := json.Unmarshal(params, &args); err != nil {\n")
-	sb.WriteString("\t\treturn nil, fmt.Errorf(\"failed to unmarshal params: %w\", err)\n")
-	sb.WriteString("\t}\n\n")
+	if len(fn.Inputs) > 0 {
+		sb.WriteString(fmt.Sprintf("\tvar args %sParams\n", fn.Name))
+		sb.WriteString("\tif len(params) > 0 {\n")
+		sb.WriteString("\t\tif err := json.Unmarshal(params, &args); err != nil {\n")
+		sb.WriteString("\t\t\treturn nil, fmt.Errorf(\"failed to unmarshal params: %w\", err)\n")
+		sb.WriteString("\t\t}\n")
+		sb.WriteString("\t}\n\n")
+	}
 
 	// 生成函数调用代码
 	sb.WriteString("\t// 调用原始函数\n")
@@ -152,15 +156,15 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 	// 处理返回值
 	if hasReturnValue && len(fn.Outputs) > 1 {
 		sb.WriteString("\t// 处理返回值\n")
-		sb.WriteString("\treturn map[string]any{\n")
+		sb.WriteString("\tresults := make([]any, 0)\n")
 		for i, output := range fn.Outputs {
 			if output.Name != "" {
-				sb.WriteString(fmt.Sprintf("\t\t\"%s\": %s,\n", output.Name, output.Name))
+				sb.WriteString(fmt.Sprintf("\tresults = append(results, %s)\n", output.Name))
 			} else {
-				sb.WriteString(fmt.Sprintf("\t\t\"result%d\": result%d,\n", i, i))
+				sb.WriteString(fmt.Sprintf("\tresults = append(results, result%d)\n", i))
 			}
 		}
-		sb.WriteString("\t}, nil\n")
+		sb.WriteString("\treturn results, nil\n")
 	} else if hasReturnValue && len(fn.Outputs) == 1 {
 		sb.WriteString("\treturn ")
 		if fn.Outputs[0].Name != "" {
