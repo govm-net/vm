@@ -8,35 +8,33 @@ import (
 )
 
 type ProcessUserParams struct {
-	User *User `json:"user"`
+	User *User `json:"user,omitempty"`
 }
 
-func handleProcessUser(ctx *core.Context, params []byte) (any, error) {
+func handleProcessUser(ctx core.Context, params []byte) (any, error) {
 	var args ProcessUserParams
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
 	}
 
 	// 调用原始函数
-	result := ProcessUser(args.User)
+	result0 := ProcessUser(args.User)
 
-	// 处理返回值
-	return result, nil
+	return result0, nil
 }
 
 type CreateOrderParams struct {
-	Order *Order `json:"order"`
+	Order *Order `json:"order,omitempty"`
 }
 
-func handleCreateOrder(ctx *core.Context, params []byte) (any, error) {
+func handleCreateOrder(ctx core.Context, params []byte) (any, error) {
 	var args CreateOrderParams
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
 	}
 
 	// 调用原始函数
-	result := CreateOrder(args.Order)
+	result0 := CreateOrder(args.Order)
 
-	// 处理返回值
-	return result, nil
+	return result0, nil
 }

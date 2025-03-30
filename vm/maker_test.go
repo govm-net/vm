@@ -89,25 +89,8 @@ func TestCompileContract(t *testing.T) {
 		t.Errorf("Compiled code should not be empty")
 	}
 
-	// In the current implementation, compiled code is just the source code
-	if string(compiledCode) != string(validContract) {
-		t.Errorf("Compiled code should match the source code in the current implementation")
-	}
-
 	// Test compilation of an invalid contract
-	invalidContract := []byte(`
-package invalidcontract
-
-import (
-	"fmt" // Disallowed import
-)
-
-type InvalidContract struct{}
-
-func (c *InvalidContract) DoSomething() {
-	fmt.Println("This should not compile")
-}
-`)
+	invalidContract, _ := testContracts.ReadFile("testdata/invalid_import_contract.go")
 
 	_, err = maker.CompileContract(invalidContract)
 	if err == nil {
@@ -141,5 +124,92 @@ func TestInstantiateContract(t *testing.T) {
 	}
 	if contractInstance == nil {
 		t.Errorf("Instantiated contract should not be nil")
+	}
+}
+
+func TestValidateNoMaliciousCommands(t *testing.T) {
+	// Create a maker with default config
+	config := api.ContractConfig{
+		MaxCodeSize: 1024 * 1024, // 1MB
+		AllowedImports: []string{
+			"github.com/govm-net/vm/core",
+		},
+	}
+	maker := NewMaker(config)
+
+	tests := []struct {
+		name    string
+		code    string
+		wantErr bool
+	}{
+		{
+			name: "valid single-line comment",
+			code: `package test
+// This is a normal comment
+func main() {}`,
+			wantErr: false,
+		},
+		{
+			name: "valid multi-line comment",
+			code: `package test
+/* This is a normal
+   multi-line comment */
+func main() {}`,
+			wantErr: false,
+		},
+		{
+			name: "restricted single-line comment - go build",
+			code: `package test
+// go build -o test
+func main() {}`,
+			wantErr: true,
+		},
+		{
+			name: "restricted single-line comment - +build",
+			code: `package test
+// +build linux,amd64
+func main() {}`,
+			wantErr: true,
+		},
+		{
+			name: "restricted multi-line comment - go build",
+			code: `package test
+/* go build -o test
+   some other text */
+func main() {}`,
+			wantErr: true,
+		},
+		{
+			name: "restricted multi-line comment - +build",
+			code: `package test
+/* +build linux,amd64
+   some other text */
+func main() {}`,
+			wantErr: true,
+		},
+		{
+			name: "normal word containing restricted prefix",
+			code: `package test
+// going to implement something
+func main() {}`,
+			wantErr: false,
+		},
+		{
+			name: "normal multi-line comment containing word with restricted prefix",
+			code: `package test
+/* going to implement
+   something */
+func main() {}`,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := maker.validateNoMaliciousCommands([]byte(tt.code))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateNoMaliciousCommands() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

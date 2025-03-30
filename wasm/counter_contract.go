@@ -4,6 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/govm-net/vm/core"
 )
 
 // 计数器合约的状态键
@@ -13,7 +15,7 @@ const (
 
 // 初始化合约
 // 此函数是大写开头的，因此会被自动导出并在合约部署时调用
-func Initialize(ctx *Context) int32 {
+func Initialize(ctx core.Context) int32 {
 	// 获取合约的默认Object（空ObjectID）
 	defaultObj, err := ctx.GetObject(ObjectID{})
 	if err != nil {
@@ -33,7 +35,7 @@ func Initialize(ctx *Context) int32 {
 }
 
 // 增加计数器
-func Increment(ctx *Context, value uint64) uint64 {
+func Increment(ctx core.Context, value uint64) uint64 {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(ObjectID{})
 	if err != nil {
@@ -70,7 +72,7 @@ func Increment(ctx *Context, value uint64) uint64 {
 }
 
 // 获取计数器当前值
-func GetCounter(ctx *Context) uint64 {
+func GetCounter(ctx core.Context) uint64 {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(ObjectID{})
 	if err != nil {
@@ -90,7 +92,7 @@ func GetCounter(ctx *Context) uint64 {
 }
 
 // 重置计数器值为0
-func Reset(ctx *Context) {
+func Reset(ctx core.Context) {
 	// 检查调用者是否为合约所有者
 	if ctx.Sender() != ctx.ContractAddress() {
 		ctx.Log("error", "message", "无权限重置计数器")
@@ -116,7 +118,7 @@ func Reset(ctx *Context) {
 }
 
 // 初始化计数器函数
-func handleInitialize(ctx *Context, params []byte) (any, error) {
+func handleInitialize(ctx core.Context, params []byte) (any, error) {
 	fmt.Println("handleInitialize")
 
 	out := Initialize(ctx)
@@ -129,7 +131,7 @@ func handleInitialize(ctx *Context, params []byte) (any, error) {
 }
 
 // 增加计数器函数
-func handleIncrement(ctx *Context, params []byte) (any, error) {
+func handleIncrement(ctx core.Context, params []byte) (any, error) {
 	// 解析参数
 	var incrParams struct {
 		Amount int64 `json:"amount"`
@@ -153,7 +155,7 @@ func handleIncrement(ctx *Context, params []byte) (any, error) {
 }
 
 // 获取计数器当前值
-func handleGetCounter(ctx *Context, params []byte) (any, error) {
+func handleGetCounter(ctx core.Context, params []byte) (any, error) {
 	value := GetCounter(ctx)
 
 	// 返回当前值
@@ -161,7 +163,7 @@ func handleGetCounter(ctx *Context, params []byte) (any, error) {
 }
 
 // 重置计数器函数
-func handleReset(ctx *Context, params []byte) (any, error) {
+func handleReset(ctx core.Context, params []byte) (any, error) {
 	// 验证调用者权限
 	Reset(ctx)
 	// 返回成功结果
@@ -175,7 +177,7 @@ func init() {
 	registerContractFunction("Increment", handleIncrement)
 	registerContractFunction("GetCounter", handleGetCounter)
 	registerContractFunction("Reset", handleReset)
-	registerContractFunction("Panic", func(ctx *Context, params []byte) (any, error) {
+	registerContractFunction("Panic", func(ctx core.Context, params []byte) (any, error) {
 		panic("test panic")
 	})
 }

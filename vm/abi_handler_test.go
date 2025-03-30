@@ -3,7 +3,6 @@ package vm
 import (
 	_ "embed"
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -52,12 +51,10 @@ func TestGenerateHandlerFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to generate handler file: %v", err)
 	}
-	code1 := strings.TrimSpace(string(structContractHandlers))
-	code2 := strings.TrimSpace(code)
 
 	// 验证生成的代码
-	if code1 != code2 {
-		t.Errorf("Generated code does not match expected:\nGot:\n%s\nExpected:\n%s", code2, code1)
+	if string(structContractHandlers) != string(code) {
+		t.Errorf("Generated code does not match expected:\nGot:\n%s\nExpected:\n%s", code, structContractHandlers)
 	}
 }
 

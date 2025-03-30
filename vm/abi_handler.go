@@ -63,7 +63,7 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	sb.WriteString(fmt.Sprintf("package %s\n\n", g.abi.PackageName))
 	sb.WriteString("import (\n")
 	sb.WriteString("\t\"encoding/json\"\n")
-	sb.WriteString("\t\"fmt\"\n\n")
+	sb.WriteString("\t\"fmt\"\n")
 	sb.WriteString("\t\"github.com/govm-net/vm/core\"\n")
 	sb.WriteString(")\n\n")
 
@@ -150,7 +150,7 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 	sb.WriteString(")\n\n")
 
 	// 处理返回值
-	if hasReturnValue {
+	if hasReturnValue && len(fn.Outputs) > 1 {
 		sb.WriteString("\t// 处理返回值\n")
 		sb.WriteString("\treturn map[string]any{\n")
 		for i, output := range fn.Outputs {
@@ -161,10 +161,16 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 			}
 		}
 		sb.WriteString("\t}, nil\n")
+	} else if hasReturnValue && len(fn.Outputs) == 1 {
+		sb.WriteString("\treturn ")
+		if fn.Outputs[0].Name != "" {
+			sb.WriteString(fmt.Sprintf("%s, nil\n", fn.Outputs[0].Name))
+		} else {
+			sb.WriteString("result0, nil\n")
+		}
 	} else {
 		sb.WriteString("\treturn nil, nil\n")
 	}
-
 	sb.WriteString("}\n\n")
 	return sb.String()
 }

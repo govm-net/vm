@@ -8,9 +8,16 @@ import (
 	"strings"
 )
 
+// Import represents an import statement in the contract
+type Import struct {
+	Path string `json:"path,omitempty"` // 导入路径
+	Name string `json:"name,omitempty"` // 别名（如果有）
+}
+
 // ABI represents the Application Binary Interface of a contract
 type ABI struct {
 	PackageName string     `json:"package_name,omitempty"`
+	Imports     []Import   `json:"imports,omitempty"`
 	Functions   []Function `json:"functions,omitempty"`
 	Events      []Event    `json:"events,omitempty"`
 }
@@ -45,8 +52,20 @@ func ExtractABI(code []byte) (*ABI, error) {
 
 	abi := &ABI{
 		PackageName: file.Name.Name,
+		Imports:     make([]Import, 0),
 		Functions:   make([]Function, 0),
 		Events:      make([]Event, 0),
+	}
+
+	// 提取导入信息
+	for _, imp := range file.Imports {
+		importInfo := Import{
+			Path: strings.Trim(imp.Path.Value, "\""),
+		}
+		if imp.Name != nil {
+			importInfo.Name = imp.Name.Name
+		}
+		abi.Imports = append(abi.Imports, importInfo)
 	}
 
 	// Extract package-level functions and events
@@ -252,6 +271,15 @@ func getTypeString(expr ast.Expr) string {
 func (abi *ABI) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Package: %s\n", abi.PackageName))
+
+	sb.WriteString("\nImports:\n")
+	for _, imp := range abi.Imports {
+		if imp.Name != "" {
+			sb.WriteString(fmt.Sprintf("  %s %s\n", imp.Name, imp.Path))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s\n", imp.Path))
+		}
+	}
 
 	sb.WriteString("\nFunctions:\n")
 	for _, fn := range abi.Functions {

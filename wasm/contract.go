@@ -71,7 +71,7 @@ func init() {
 	runtime.GOMAXPROCS(1)
 
 	// 注册合约中的函数
-	registerContractFunction("Transfer", handleTransfer)
+	// registerContractFunction("Transfer", handleTransfer)
 	// 其他函数注册可以添加在这里
 }
 
@@ -588,7 +588,7 @@ const (
 var lastErrorMessage string
 
 // 合约函数处理器类型
-type ContractFunctionHandler func(ctx *Context, params []byte) (any, error)
+type ContractFunctionHandler func(ctx core.Context, params []byte) (any, error)
 
 // 合约函数处理表，将在初始化时填充
 var contractFunctions = map[string]ContractFunctionHandler{}

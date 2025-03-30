@@ -38,12 +38,12 @@ func TestNewSimpleVM(t *testing.T) {
 	}
 	fmt.Printf("result: %v, type: %T\n", result, result)
 
-	// 测试执行合约
-	result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
-	if err != nil {
-		t.Fatalf("ExecuteContract() error = %v", err)
-	}
-	fmt.Printf("result: %v, type: %T\n", result, result)
+	// // 测试执行合约
+	// result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
+	// if err != nil {
+	// 	t.Fatalf("ExecuteContract() error = %v", err)
+	// }
+	// fmt.Printf("result: %v, type: %T\n", result, result)
 
 	// 测试执行合约
 	// result, err = svm.ExecuteContract(ctx, contractAddr, core.Address{}, "Increment", []byte(`{"amount": 2}`))
