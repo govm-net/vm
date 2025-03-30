@@ -1,5 +1,5 @@
 // Package vm 实现了基于WebAssembly的虚拟机核心功能
-package vm
+package wasi
 
 import (
 	"encoding/json"
@@ -20,7 +20,6 @@ func TestNewWazeroVM(t *testing.T) {
 	}
 
 	code, err := os.ReadFile("../wasm/contract.wasm")
-	// code, err := os.ReadFile("./contracts/contracts/31306436313461613033623135333562376461623536643733653230653161303034666131613931.wasm")
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}

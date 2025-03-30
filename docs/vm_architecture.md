@@ -2,7 +2,7 @@
 
 ## 1. 系统概述
 
-VM 系统是一个专为区块链智能合约设计的新型执行环境，采用 Go 语言实现，将智能合约编译为 WebAssembly 模块并通过 Wasmer 运行时执行。与传统的区块链虚拟机不同，该系统让开发者能够使用 Go 语言编写智能合约，同时享受 WebAssembly 带来的安全性、跨平台性和性能优势。
+VM 系统是一个专为区块链智能合约设计的新型执行环境，采用 Go 语言实现，将智能合约编译为 WebAssembly 模块并通过 wazero 运行时执行。与传统的区块链虚拟机不同，该系统让开发者能够使用 Go 语言编写智能合约，同时享受 WebAssembly 带来的安全性、跨平台性和性能优势。
 
 ### 1.1 核心设计理念
 
@@ -73,7 +73,7 @@ VM 系统架构采用分层设计，每一层都有明确的职责和接口：
 │               执行环境层 (Execution Layer)                  │
 │                                                           │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
-│  │  WASM编译器  │  │ Wasmer运行时 │  │ WASI系统接口    │    │
+│  │  WASM编译器  │  │ wazero运行时 │  │ WASI系统接口    │    │
 │  └─────────────┘  └─────────────┘  └─────────────────┘    │
 └───────────────────────────────────────────────────────────┘
                             ▲
@@ -93,7 +93,7 @@ VM 系统架构采用分层设计，每一层都有明确的职责和接口：
 新的目录结构更加清晰地反映了系统的各个组件及其关系，并且对合约开发者隐藏了不必要的复杂性：
 
 ```
-govm-net/vm/
+/
 ├── cmd/                        # 命令行工具
 │   ├── vm-cli/                 # VM管理命令行工具
 │   └── contract-compiler/      # 合约编译工具
@@ -106,7 +106,6 @@ govm-net/vm/
 │   └── errors.go               # 错误类型定义
 │
 ├── api/                        # API接口定义（面向平台集成者）
-│   ├── contract_api.go         # 合约API接口
 │   ├── system_api.go           # 系统API接口
 │   └── config.go               # 配置接口
 │
@@ -118,8 +117,7 @@ govm-net/vm/
 │
 ├── vm/                         # 虚拟机实现
 │   ├── engine.go               # VM引擎主实现
-│   ├── execution_context.go    # 执行上下文实现
-│   └── wasm_engine.go          # WebAssembly执行引擎
+│   └── execution_context.go    # 执行上下文实现
 │
 ├── state/                      # 状态管理系统
 │   ├── object.go               # 对象接口实现
@@ -128,6 +126,7 @@ govm-net/vm/
 │   └── state_manager.go        # 状态管理器
 │
 ├── wasi/                       # WebAssembly系统接口
+│   ├── wasm_engine.go          # WebAssembly执行引擎
 │   ├── env.go                  # WASI环境变量
 │   ├── filesystem.go           # 文件系统接口
 │   ├── memory.go               # 内存管理
@@ -277,7 +276,7 @@ flowchart LR
     E --> F[处理执行结果]
     F --> G[返回结果]
     
-    subgraph Wasmer运行时环境
+    subgraph wazero运行时环境
         B
         C
         D

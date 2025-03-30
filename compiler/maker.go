@@ -1,5 +1,5 @@
 // Package runtime provides the execution environment for smart contracts.
-package vm
+package compiler
 
 import (
 	"errors"
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/govm-net/vm/abi"
 	"github.com/govm-net/vm/api"
 )
 
@@ -22,8 +23,9 @@ type Maker struct {
 
 var VM_IMPORT_PATH = "./"
 
-// var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "-opt", "z", "-no-debug", "-gc", "leaking", "./"}
-var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "./"}
+var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "-opt", "z", "-no-debug", "./"}
+
+// var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "./"}
 
 // unique removes duplicates from a string slice
 func unique(slice []string) []string {
@@ -302,12 +304,12 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 
 	// 1. 提取代码的abi
-	abi, err := ExtractABI(code)
+	abiInfo, err := abi.ExtractABI(code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract ABI: %w", err)
 	}
 	//如果函数个数为0，则返回错误
-	if len(abi.Functions) == 0 {
+	if len(abiInfo.Functions) == 0 {
 		return nil, errors.New("contract must have at least one exported (public) function")
 	}
 
@@ -322,22 +324,22 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 
 	// 3. 将代码放到临时文件夹，并修改包名为main
 	contractCode := string(code)
-	contractCode = strings.Replace(contractCode, "package "+abi.PackageName, "package main", 1)
+	contractCode = strings.Replace(contractCode, "package "+abiInfo.PackageName, "package main", 1)
 	contractFile := filepath.Join(tmpDir, "source.go")
 	if err := os.WriteFile(contractFile, []byte(contractCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write contract code: %w", err)
 	}
 
 	// 4. 生成handle函数
-	handlerGenerator := NewHandlerGenerator(abi)
+	handlerGenerator := abi.NewHandlerGenerator(abiInfo)
 	handlerCode := handlerGenerator.GenerateHandlers()
 
 	// 修改生成的代码，使用 main 包
-	handlerCode = strings.Replace(handlerCode, "package "+abi.PackageName, "package main", 1)
+	handlerCode = strings.Replace(handlerCode, "package "+abiInfo.PackageName, "package main", 1)
 
 	// 修改合约代码，使用 main 包
 	contractCode = string(code)
-	contractCode = strings.Replace(contractCode, "package "+abi.PackageName, "package main", 1)
+	contractCode = strings.Replace(contractCode, "package "+abiInfo.PackageName, "package main", 1)
 
 	// 写入修改后的合约代码
 	if err := os.WriteFile(contractFile, []byte(contractCode), 0644); err != nil {
@@ -358,7 +360,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 
 	// 修改contract.go，添加handler函数的注册
 	registerCode := "\nfunc init() {\n"
-	for _, fn := range abi.Functions {
+	for _, fn := range abiInfo.Functions {
 		if fn.IsExported {
 			registerCode += fmt.Sprintf("\tregisterContractFunction(\"%s\", handle%s)\n", fn.Name, fn.Name)
 		}

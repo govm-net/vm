@@ -30,9 +30,9 @@
 
 ## 依赖
 
-- Go 1.20+
-- TinyGo 0.28.0+（用于编译合约）
-- Wasmer 2.3.0+（WebAssembly运行时）
+- Go 1.23+
+- TinyGo 0.37.0+（用于编译合约）
+- wazero（WebAssembly运行时）
 
 ## 安装
 
@@ -211,7 +211,7 @@ VM提供了简单的状态管理功能：
 
 ### WebAssembly执行环境
 
-基于Wasmer实现的WebAssembly执行环境，支持：
+基于wazero实现的WebAssembly执行环境，支持：
 
 - 加载并实例化WebAssembly模块
 - 提供宿主函数给合约调用

@@ -8,15 +8,17 @@ import (
 	"sync"
 
 	"github.com/govm-net/vm/api"
+	"github.com/govm-net/vm/compiler"
 	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/types"
+	"github.com/govm-net/vm/wasi"
 )
 
 // Engine 合约引擎，负责合约的部署和执行
 type Engine struct {
 	config        *Config
-	maker         *Maker
-	wazero_engine *WazeroVM
+	maker         *compiler.Maker
+	wazero_engine *wasi.WazeroVM
 	contracts     map[core.Address][]byte
 	contractsLock sync.RWMutex
 	ctx           types.BlockchainContext // 区块链上下文
@@ -74,10 +76,10 @@ func NewEngine(config *Config) (*Engine, error) {
 		MaxCodeSize:    uint64(config.MaxContractSize),
 		AllowedImports: []string{"github.com/govm-net/vm/core"},
 	}
-	maker := NewMaker(contractConfig)
+	maker := compiler.NewMaker(contractConfig)
 
 	// 创建WazeroEngine实例
-	wazero_engine, err := NewWazeroVM(config.WASIContractsDir)
+	wazero_engine, err := wasi.NewWazeroVM(config.WASIContractsDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wazero engine: %w", err)
 	}
@@ -87,7 +89,7 @@ func NewEngine(config *Config) (*Engine, error) {
 		maker:         maker,
 		wazero_engine: wazero_engine,
 		contracts:     make(map[core.Address][]byte),
-		ctx:           NewDefaultBlockchainContext(),
+		ctx:           wasi.NewDefaultBlockchainContext(),
 	}, nil
 }
 
@@ -193,7 +195,7 @@ func (e *Engine) ExecuteContract(contractAddr core.Address, function string, arg
 	}
 
 	// 解析ABI JSON
-	var abi map[string]FunctionInfo
+	var abi map[string]compiler.FunctionInfo
 	if err := json.Unmarshal(abiData, &abi); err != nil {
 		return nil, fmt.Errorf("failed to parse ABI JSON: %w", err)
 	}

@@ -26,7 +26,7 @@
 ```mermaid
 flowchart TD
     subgraph GoWasm["Go+WebAssembly (本项目)"]
-        A1[Go源码] --> A2[TinyGo编译] --> A3[WebAssembly模块] --> A4[Wasmer执行]
+        A1[Go源码] --> A2[TinyGo编译] --> A3[WebAssembly模块] --> A4[wazero执行]
     end
     
     subgraph Ethereum["以太坊"]

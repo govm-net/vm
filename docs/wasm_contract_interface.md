@@ -446,12 +446,12 @@ type HostState struct {
 
 ```go
 // 处理设置类操作的函数
-func callHostSetHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
+func callHostSetHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error) {
     // 处理不需要返回复杂数据的操作
 }
 
 // 处理获取缓冲区数据的函数
-func callHostGetBufferHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error) {
+func callHostGetBufferHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error) {
     // 处理需要返回复杂数据的操作
 }
 ```
@@ -460,13 +460,13 @@ func callHostGetBufferHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]was
 
 ```go
 // 获取区块高度处理函数
-func getBlockHeightHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error)
+func getBlockHeightHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
 
 // 获取区块时间处理函数
-func getBlockTimeHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error)
+func getBlockTimeHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
 
 // 获取余额处理函数
-func getBalanceHandler(memory *wasmer.Memory) func([]wasmer.Value) ([]wasmer.Value, error)
+func getBalanceHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
 ```
 
 ## 4. 通信流程

@@ -10,7 +10,7 @@ VM 项目的 WebAssembly 智能合约系统允许开发者使用 Go 语言编写
 flowchart TD
     A[Go源码合约] --> B[TinyGo编译]
     B --> C[WASM模块]
-    C --> D[Wasmer运行时]
+    C --> D[wazero运行时]
     D <--> E[区块链状态]
     
     subgraph 开发者环境
@@ -223,7 +223,7 @@ func performTransfer(to Address, amount uint64) error {
 当前文档适用于 VM 项目 v1.0.0 版本。系统保持向后兼容，但以下方面可能存在版本差异：
 
 - TinyGo 版本：推荐使用 0.29.0 或更高版本
-- Wasmer 运行时：推荐使用 2.3.0 或更高版本
+- wazero 运行时：推荐使用 2.3.0 或更高版本
 - Go 语言：推荐使用 1.20 或更高版本
 
 ## 5. 文档更新计划
@@ -249,7 +249,7 @@ func performTransfer(to Address, amount uint64) error {
 | WebAssembly | 可移植的二进制指令格式，作为智能合约执行的目标格式 |
 | WASI | WebAssembly 系统接口，提供标准化的系统调用 |
 | TinyGo | Go 语言的编译器，针对小内存环境优化，用于将 Go 代码编译为 WebAssembly |
-| Wasmer | WebAssembly 运行时，用于执行 WebAssembly 模块 |
+| wazero | WebAssembly 运行时，用于执行 WebAssembly 模块 |
 | 插桩 | 自动向合约代码中注入额外指令的过程，用于追踪调用链和增强功能 |
 | 调用链 | 跨合约调用的执行路径，记录从起始调用到当前执行点的所有合约和函数 |
 | 沙箱 | 隔离的执行环境，限制合约对外部资源的访问 |

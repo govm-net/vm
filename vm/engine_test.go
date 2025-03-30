@@ -9,7 +9,11 @@ import (
 	"testing"
 
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/wasi"
 )
+
+//go:embed testdata/counter_contract.go
+var counterContractCode []byte
 
 func TestNewEngine(t *testing.T) {
 	// 创建临时目录用于测试
@@ -89,7 +93,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	}
 	defer engine.Close()
 
-	ctx := NewDefaultBlockchainContext()
+	ctx := wasi.NewDefaultBlockchainContext()
 	engine = engine.WithContext(ctx)
 
 	// 测试合约代码

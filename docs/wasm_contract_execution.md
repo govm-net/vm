@@ -271,7 +271,7 @@ defaultObj, err := ctx.GetObject(ObjectID{}) // 传入空ObjectID
 
 ```go
 // 加载 WebAssembly 模块
-func (e *Engine) loadWasmModule(contractAddr vm.Address) (*wasmer.Module, error) {
+func (e *Engine) loadWasmModule(contractAddr vm.Address) (*wazero.Module, error) {
     // 获取合约路径
     e.contractsLock.RLock()
     wasmPath, exists := e.contracts[contractAddr]
@@ -288,9 +288,9 @@ func (e *Engine) loadWasmModule(contractAddr vm.Address) (*wasmer.Module, error)
     }
     
     // 编译WebAssembly模块
-    engine := wasmer.NewEngine()
-    store := wasmer.NewStore(engine)
-    module, err := wasmer.NewModule(store, wasmBytes)
+    engine := wazero.NewEngine()
+    store := wazero.NewStore(engine)
+    module, err := wazero.NewModule(store, wasmBytes)
     if err != nil {
         return nil, fmt.Errorf("failed to compile WASM module: %w", err)
     }
@@ -305,13 +305,13 @@ func (e *Engine) loadWasmModule(contractAddr vm.Address) (*wasmer.Module, error)
 
 ```go
 // 创建执行环境
-func (e *Engine) createExecutionEnvironment(module *wasmer.Module) (*ExecutionEnvironment, error) {
+func (e *Engine) createExecutionEnvironment(module *wazero.Module) (*ExecutionEnvironment, error) {
     // 创建存储和引擎
-    engine := wasmer.NewEngine()
-    store := wasmer.NewStore(engine)
+    engine := wazero.NewEngine()
+    store := wazero.NewStore(engine)
     
     // 创建WASI环境
-    wasiEnv, err := wasmer.NewWasiStateBuilder("wasi-program").
+    wasiEnv, err := wazero.NewWasiStateBuilder("wasi-program").
         Argument("--verbose").
         MapDirectory(".", ".").
         CaptureStdout().
@@ -328,18 +328,18 @@ func (e *Engine) createExecutionEnvironment(module *wasmer.Module) (*ExecutionEn
     }
     
     // 创建内存
-    limits, _ := wasmer.NewLimits(16, 128)
-    memoryType := wasmer.NewMemoryType(limits)
-    memory := wasmer.NewMemory(store, memoryType)
+    limits, _ := wazero.NewLimits(16, 128)
+    memoryType := wazero.NewMemoryType(limits)
+    memory := wazero.NewMemory(store, memoryType)
     
     // 添加宿主函数到导入对象
-    wasiImports.Register("env", map[string]wasmer.IntoExtern{
+    wasiImports.Register("env", map[string]wazero.IntoExtern{
         "memory": memory,
-        "call_host_set": wasmer.NewFunction(...),
-        "call_host_get_buffer": wasmer.NewFunction(...),
-        "get_block_height": wasmer.NewFunction(...),
-        "get_block_time": wasmer.NewFunction(...),
-        "get_balance": wasmer.NewFunction(...),
+        "call_host_set": wazero.NewFunction(...),
+        "call_host_get_buffer": wazero.NewFunction(...),
+        "get_block_height": wazero.NewFunction(...),
+        "get_block_time": wazero.NewFunction(...),
+        "get_balance": wazero.NewFunction(...),
         // ...其他宿主函数
     })
     
@@ -358,9 +358,9 @@ func (e *Engine) createExecutionEnvironment(module *wasmer.Module) (*ExecutionEn
 
 ```go
 // 实例化WebAssembly模块
-func (e *Engine) instantiateModule(env *ExecutionEnvironment) (*wasmer.Instance, error) {
+func (e *Engine) instantiateModule(env *ExecutionEnvironment) (*wazero.Instance, error) {
     // 创建实例
-    instance, err := wasmer.NewInstance(env.Module, env.Imports)
+    instance, err := wazero.NewInstance(env.Module, env.Imports)
     if err != nil {
         return nil, fmt.Errorf("failed to instantiate WASM module: %w", err)
     }
@@ -380,7 +380,7 @@ func (e *Engine) instantiateModule(env *ExecutionEnvironment) (*wasmer.Instance,
 
 ```go
 // 调用合约函数
-func (e *Engine) callContractFunction(instance *wasmer.Instance, functionName string, args ...interface{}) (interface{}, error) {
+func (e *Engine) callContractFunction(instance *wazero.Instance, functionName string, args ...interface{}) (interface{}, error) {
     // 获取统一入口函数
     handleContractCall, err := instance.Exports.GetFunction("handle_contract_call")
     if err != nil {
@@ -422,7 +422,7 @@ func (e *Engine) callContractFunction(instance *wasmer.Instance, functionName st
 }
 
 // 分配WebAssembly内存辅助函数
-func allocateWasmMemory(instance *wasmer.Instance, size int32) (int32, error) {
+func allocateWasmMemory(instance *wazero.Instance, size int32) (int32, error) {
     allocate, err := instance.Exports.GetFunction("allocate")
     if err != nil {
         return 0, err
@@ -437,7 +437,7 @@ func allocateWasmMemory(instance *wasmer.Instance, size int32) (int32, error) {
 }
 
 // 复制数据到WebAssembly内存
-func copyToWasmMemory(instance *wasmer.Instance, ptr int32, data []byte) error {
+func copyToWasmMemory(instance *wazero.Instance, ptr int32, data []byte) error {
     memory := instance.Exports.GetMemory("memory")
     if memory == nil {
         return errors.New("memory not exported")
@@ -944,7 +944,7 @@ func (e *Engine) executeContractCall(request []byte) (interface{}, error) {
 sequenceDiagram
     participant User as 用户/调用者
     participant VM as 虚拟机引擎
-    participant WasmRuntime as Wasmer运行时
+    participant WasmRuntime as wazero运行时
     participant Contract as 合约代码1
     participant Contract2 as 合约代码2
     participant State as 区块链状态
@@ -1073,9 +1073,9 @@ flowchart TD
 
 ```go
 // 创建内存限制
-limits, err := wasmer.NewLimits(16, 128) // 初始16页(1MB)，最大128页(8MB)
-memoryType := wasmer.NewMemoryType(limits)
-memory := wasmer.NewMemory(store, memoryType)
+limits, err := wazero.NewLimits(16, 128) // 初始16页(1MB)，最大128页(8MB)
+memoryType := wazero.NewMemoryType(limits)
+memory := wazero.NewMemory(store, memoryType)
 ```
 
 系统的内存管理策略包括：
@@ -1134,7 +1134,7 @@ var defaultCostTable = map[string]uint64{
 }
 
 // 在合约执行中实现燃料计量
-func (e *Engine) withFuelLimit(instance *wasmer.Instance, fuelLimit uint64, fn func() (interface{}, error)) (interface{}, error) {
+func (e *Engine) withFuelLimit(instance *wazero.Instance, fuelLimit uint64, fn func() (interface{}, error)) (interface{}, error) {
     // 设置初始燃料
     e.remainingFuel = fuelLimit
     

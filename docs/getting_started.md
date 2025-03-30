@@ -1,23 +1,15 @@
 # 入门指南：使用 VM 构建你的第一个智能合约
 
-本指南将帮助您开始使用 VM 编写、部署和测试基于 Go 语言的智能合约，这些合约将被编译为 WebAssembly 模块并通过 Wasmer 运行时执行。
+本指南将帮助您开始使用 VM 编写、部署和测试基于 Go 语言的智能合约，这些合约将被编译为 WebAssembly 模块并通过 wazero 运行时执行。
 
 ## 安装要求
 
 在开始之前，确保您的系统满足以下要求：
 
-- 安装 Go 1.18 或更高版本
+- 安装 Go 1.23 或更高版本
 - 安装 TinyGo (用于将 Go 代码编译为 WebAssembly)
   ```bash
   go install tinygo.org/x/tinygo@latest
-  ```
-- 安装 Wasmer 运行时
-  ```bash
-  curl https://get.wasmer.io -sSfL | sh
-  ```
-- 安装 Go Wasmer 模块
-  ```bash
-  go get github.com/wasmerio/wasmer-go
   ```
 - 熟悉基本的 Go 语言概念
 - 了解基本的区块链和智能合约概念
@@ -769,7 +761,7 @@ WASIOptions: vm.WASIOptions{
    ```go
    // 获取当前内存使用
    memoryPages := module.Memory().Size()
-   memoryBytes := memoryPages * wasmer.WasmPageSize // 每页64KB
+   memoryBytes := memoryPages * wazero.WasmPageSize // 每页64KB
    ```
 
 2. **执行时间监控**：
@@ -828,8 +820,8 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) error {
 # 列出WASM模块目录
 ls -la wasi_modules/
 
-# 使用Wasmer运行和调试WASM模块
-wasmer run --mapdir=/tmp:/tmp wasi_modules/your_contract.wasm -- -debug
+# 使用wazero运行和调试WASM模块
+wazero run --mapdir=/tmp:/tmp wasi_modules/your_contract.wasm -- -debug
 
 # 检查WASM模块的内部结构
 wasm-objdump -x wasi_modules/your_contract.wasm

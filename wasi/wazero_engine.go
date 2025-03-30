@@ -1,4 +1,4 @@
-package vm
+package wasi
 
 import (
 	"context"

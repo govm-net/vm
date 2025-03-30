@@ -1,13 +1,13 @@
 # WebAssembly 智能合约
 
-本文档详细介绍了 VM 项目中的 WebAssembly (WASI) 合约执行模式，该模式通过 TinyGo 将 Go 代码编译为 WebAssembly 模块，并使用 Wasmer 运行时执行。
+本文档详细介绍了 VM 项目中的 WebAssembly (WASI) 合约执行模式，该模式通过 TinyGo 将 Go 代码编译为 WebAssembly 模块，并使用 wazero 运行时执行。
 
 ## WebAssembly 执行模式概述
 
 VM 项目采用 WebAssembly 作为合约执行的核心技术，通过以下步骤实现：
 
 1. 使用 TinyGo 将 Go 合约代码编译为符合 WASI 规范的 WebAssembly 模块
-2. 由 Wasmer 运行时加载和执行这些 WebAssembly 模块
+2. 由 wazero 运行时加载和执行这些 WebAssembly 模块
 3. 通过 WASI 接口在合约与 VM 环境之间实现安全通信
 4. 确保合约在沙箱环境中执行，且能被精确控制资源使用
 
@@ -584,7 +584,7 @@ VM 通过以下组件和流程实现 WebAssembly 合约执行：
 
 ### 执行机制
 
-1. **模块加载**：Wasmer 运行时加载 WebAssembly 模块
+1. **模块加载**：wazero 运行时加载 WebAssembly 模块
 2. **环境准备**：设置 WASI 环境变量和目录映射
 3. **函数解析**：映射合约导出函数与对应参数
 4. **参数编码**：将 Go 类型参数编码为 WebAssembly 兼容格式
@@ -763,14 +763,14 @@ wasm-objdump -j Export -x wasi_modules/your_contract.wasm
 ### 独立运行 WASM 模块
 
 ```bash
-# 使用 wasmer 直接运行模块
-wasmer run --mapdir=/tmp:/tmp wasi_modules/your_contract.wasm -- -debug
+# 使用 wazero 直接运行模块
+wazero run --mapdir=/tmp:/tmp wasi_modules/your_contract.wasm -- -debug
 ```
 
 ### 启用 Trace 日志
 
 ```go
-// 设置 Wasmer 跟踪日志级别
+// 设置 wazero 跟踪日志级别
 config.WASIOptions.LogLevel = "trace"
 ```
 
@@ -838,7 +838,7 @@ config.WASIOptions.CacheDir = "./wasm_cache"
 
 ## 总结
 
-WebAssembly 合约执行模式是 VM 项目的核心功能，它将 Go 编写的智能合约编译为 WASI 兼容的 WebAssembly 模块，并通过 Wasmer 运行时执行。这种模式提供了安全隔离、接近原生的性能、跨平台兼容性以及精确的资源控制。
+WebAssembly 合约执行模式是 VM 项目的核心功能，它将 Go 编写的智能合约编译为 WASI 兼容的 WebAssembly 模块，并通过 wazero 运行时执行。这种模式提供了安全隔离、接近原生的性能、跨平台兼容性以及精确的资源控制。
 
 WebAssembly 合约特别适合：
 
@@ -908,7 +908,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[VM主进程] -- "传递参数\n控制执行" --> B[Wasmer运行时]
+    A[VM主进程] -- "传递参数\n控制执行" --> B[wazero运行时]
     B -- "返回结果" --> A
     
     C[VM状态存储] -- "读取状态" --> B
@@ -970,7 +970,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[接收执行请求] --> B[加载WASM模块]
-    B --> C[初始化Wasmer]
+    B --> C[初始化wazero]
     C --> D[设置内存限制]
     
     D --> E[准备参数]

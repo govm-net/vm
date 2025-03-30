@@ -1,4 +1,4 @@
-package vm
+package abi
 
 import (
 	_ "embed"

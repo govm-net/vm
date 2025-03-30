@@ -1,4 +1,4 @@
-package vm
+package abi
 
 import (
 	_ "embed"
@@ -174,5 +174,69 @@ func TestGenerateHandlerFileWithMultipleReturns(t *testing.T) {
 	if !compareCode(generatedCode, expectedCode) {
 		t.Errorf("Generated code does not match expected code:\nExpected:\n%s\nGot:\n%s",
 			expectedCode, generatedCode)
+	}
+}
+
+func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
+	// 创建一个测试用的 ABI，包含无入参的函数
+	abi := &ABI{
+		PackageName: "testcontract",
+		Functions: []Function{
+			{
+				Name:       "GetBalance",
+				IsExported: true,
+				Inputs:     []Parameter{}, // 无入参
+				Outputs: []Parameter{
+					{Name: "", Type: "uint64"},
+				},
+			},
+			{
+				Name:       "GetTimestamp",
+				IsExported: true,
+				Inputs:     []Parameter{}, // 无入参
+				Outputs: []Parameter{
+					{Name: "", Type: "int64"},
+				},
+			},
+		},
+	}
+
+	// 生成 handler 文件
+	code, err := GenerateHandlerFile(abi)
+	if err != nil {
+		t.Fatalf("Failed to generate handler file: %v", err)
+	}
+
+	// 验证生成的代码包含正确的函数签名
+	expectedCode := `package testcontract
+        
+        import (
+                "encoding/json"
+                "fmt"
+                "github.com/govm-net/vm/core"
+        )
+        
+        type GetBalanceParams struct {
+        }
+        
+        func handleGetBalance(ctx core.Context, params []byte) (any, error) {
+                // 调用原始函数
+                result0 := GetBalance()
+        
+                return result0, nil
+        }
+        
+        type GetTimestampParams struct {
+        }
+        
+        func handleGetTimestamp(ctx core.Context, params []byte) (any, error) {
+                // 调用原始函数
+                result0 := GetTimestamp()
+        
+                return result0, nil
+        }
+`
+	if !compareCode(string(code), expectedCode) {
+		t.Errorf("Generated code does not match expected:\nGot:\n%s\nExpected:\n%s", code, expectedCode)
 	}
 }
