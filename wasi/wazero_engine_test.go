@@ -37,7 +37,7 @@ func TestNewWazeroVM(t *testing.T) {
 	ctx.SetExecutionContext(contractAddr, sender)
 
 	// 测试执行合约
-	result, err := svm.ExecuteContract(ctx, contractAddr, sender, "Initialize", nil)
+	result, err := svm.ExecuteContract(ctx, contractAddr, "Initialize", nil)
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
@@ -49,7 +49,7 @@ func TestNewWazeroVM(t *testing.T) {
 	}
 
 	// 测试执行合约
-	result, err = svm.ExecuteContract(ctx, contractAddr, sender, "Increment", []byte(`{"amount": 2}`))
+	result, err = svm.ExecuteContract(ctx, contractAddr, "Increment", []byte(`{"amount": 2}`))
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestNewWazeroVM(t *testing.T) {
 	}
 
 	// 测试执行合约
-	result, err = svm.ExecuteContract(ctx, contractAddr, sender, "Increment", []byte(`{"amount": 2}`))
+	result, err = svm.ExecuteContract(ctx, contractAddr, "Increment", []byte(`{"amount": 2}`))
 	if err != nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}
@@ -73,7 +73,7 @@ func TestNewWazeroVM(t *testing.T) {
 		t.Fatalf("Increment() error = %v", resultValue)
 	}
 
-	result, err = svm.ExecuteContract(ctx, contractAddr, sender, "Panic", nil)
+	result, err = svm.ExecuteContract(ctx, contractAddr, "Panic", nil)
 	if err == nil {
 		t.Fatalf("ExecuteContract() error = %v", err)
 	}

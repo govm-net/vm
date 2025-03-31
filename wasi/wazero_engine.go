@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -87,7 +88,7 @@ func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmC
 	return contractAddr, nil
 }
 
-func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte, sender types.Address) (api.Module, error) {
+func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (api.Module, error) {
 	ctx1 := context.Background()
 	runtime := wazero.NewRuntime(ctx1)
 
@@ -191,10 +192,9 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte, s
 	// 初始化WASI
 	wasi_snapshot_preview1.MustInstantiate(vm.ctx, runtime)
 
-	// 创建模块配置，使用合约地址作为模块名称的一部分
-	moduleName := fmt.Sprintf("contract_%x", sender)
+	// 创建模块配置
 	config := wazero.NewModuleConfig().
-		WithName(moduleName).WithStdout(os.Stdout).WithStderr(os.Stderr)
+		WithName("contract").WithStdout(os.Stdout).WithStderr(os.Stderr)
 
 	// 实例化模块
 	module, err := runtime.InstantiateModule(ctx1, compiled, config.WithStartFunctions("_initialize"))
@@ -206,7 +206,7 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte, s
 }
 
 // ExecuteContract 执行已部署的合约函数
-func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr types.Address, sender types.Address, functionName string, params []byte) (interface{}, error) {
+func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr types.Address, functionName string, params []byte) (interface{}, error) {
 	// 检查合约是否存在
 	vm.contractsLock.RLock()
 	wasmCode, exists := vm.contracts[contractAddr]
@@ -216,12 +216,12 @@ func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr ty
 		return nil, fmt.Errorf("合约不存在: %x", contractAddr)
 	}
 
-	module, err := vm.initContract(ctx, wasmCode, sender)
+	module, err := vm.initContract(ctx, wasmCode)
 	if err != nil {
 		return types.Address{}, fmt.Errorf("实例化WebAssembly模块失败: %w", err)
 	}
 
-	result, err := vm.callWasmFunction(ctx, module, functionName, params)
+	result, err := vm.callWasmFunction(ctx, module, functionName, params, contractAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +245,7 @@ func (vm *WazeroVM) generateContractAddress(code []byte, _ types.Address) types.
 }
 
 // callWasmFunction 调用WASM函数
-func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Module, functionName string, params []byte) ([]byte, error) {
+func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Module, functionName string, params []byte, contractAddr types.Address) ([]byte, error) {
 	fmt.Printf("调用合约函数:%s, %v\n", functionName, string(params))
 
 	// 检查是否导出了allocate和deallocate函数
@@ -260,7 +260,8 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	}
 
 	var input types.HandleContractCallParams
-	input.Contract = ctx.ContractAddress()
+	input.Contract = contractAddr
+	input.Sender = ctx.Sender()
 	input.Function = functionName
 	input.Args = params
 	inputBytes, err := json.Marshal(input)
@@ -401,6 +402,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 	case types.FuncSetObjectField:
 		var params types.SetObjectFieldParams
 		if err := json.Unmarshal(argData, &params); err != nil {
+			slog.Error("set_object_field 反序列化失败", "error", err)
 			return -1
 		}
 		if params.ID == (types.ObjectID{}) {
@@ -408,21 +410,26 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 		}
 		obj, err := ctx.GetObject(params.Contract, params.ID)
 		if err != nil {
+			slog.Error("set_object_field 获取对象失败", "error", err)
 			return -1
 		}
 		if obj.Contract() != params.Contract {
+			slog.Error("set_object_field 对象归属错误", "contract", params.Contract, "object", obj.Contract())
 			return -1
 		}
 		if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
+			slog.Error("set_object_field 对象归属错误", "contract", params.Contract, "object", obj.Owner(), "sender", ctx.Sender())
 			return -1
 		}
 		// 将value转换为[]byte
 		valueBytes, err := json.Marshal(params.Value)
 		if err != nil {
+			slog.Error("set_object_field 序列化失败", "error", err)
 			return -1
 		}
 		err = obj.Set(params.Field, valueBytes)
 		if err != nil {
+			slog.Error("set_object_field 设置字段失败", "error", err)
 			return -1
 		}
 		return 0

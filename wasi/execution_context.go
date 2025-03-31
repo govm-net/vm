@@ -128,7 +128,7 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, id types.ObjectID) (types.VMObject, error) {
 	// 创建对象存储
 	ctx.objects[id] = make(map[string]any)
-	ctx.objectOwner[id] = ctx.Sender()
+	ctx.objectOwner[id] = contract
 	ctx.objectContract[id] = contract
 
 	// 返回对象封装

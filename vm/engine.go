@@ -232,7 +232,7 @@ func (e *Engine) Execute(contractAddr core.Address, function string, args []byte
 	}
 
 	// 执行合约函数
-	return e.wazero_engine.ExecuteContract(e.ctx, contractAddr, core.ZeroAddress, function, args)
+	return e.wazero_engine.ExecuteContract(e.ctx, contractAddr, function, args)
 }
 
 // Close 关闭引擎
