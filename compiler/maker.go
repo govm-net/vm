@@ -213,14 +213,12 @@ func (m *Maker) validateImports(file *ast.File) error {
 
 // validateNoRestrictedKeywords ensures the contract doesn't use restricted keywords.
 func (m *Maker) validateNoRestrictedKeywords(file *ast.File) error {
-	restrictedKeywordVisitor := &restrictedKeywordVisitor{
-		restrictedKeywords: api.RestrictedKeywords,
-	}
+	restrictedKeywordVisitor := &restrictedKeywordVisitor{}
 
 	ast.Walk(restrictedKeywordVisitor, file)
 
-	if restrictedKeywordVisitor.foundKeyword != "" {
-		return fmt.Errorf("restricted keyword '%s' found in contract", restrictedKeywordVisitor.foundKeyword)
+	if restrictedKeywordVisitor.err != nil {
+		return restrictedKeywordVisitor.err
 	}
 
 	return nil
@@ -228,8 +226,7 @@ func (m *Maker) validateNoRestrictedKeywords(file *ast.File) error {
 
 // restrictedKeywordVisitor is an AST visitor that detects restricted keywords.
 type restrictedKeywordVisitor struct {
-	restrictedKeywords []string
-	foundKeyword       string
+	err error
 }
 
 // Visit implements the ast.Visitor interface.
@@ -237,31 +234,10 @@ func (v *restrictedKeywordVisitor) Visit(node ast.Node) ast.Visitor {
 	if node == nil {
 		return nil
 	}
-
-	// Check for go statements (goroutines)
-	if _, ok := node.(*ast.GoStmt); ok {
-		v.foundKeyword = "go"
+	err := api.DefaultKeywordValidator(node)
+	if err != nil {
+		v.err = err
 		return nil
-	}
-
-	// Check for select statements
-	if _, ok := node.(*ast.SelectStmt); ok {
-		v.foundKeyword = "select"
-		return nil
-	}
-
-	// Check for range expressions
-	if _, ok := node.(*ast.RangeStmt); ok {
-		v.foundKeyword = "range"
-		return nil
-	}
-
-	// Check for recover calls
-	if callExpr, ok := node.(*ast.CallExpr); ok {
-		if ident, ok := callExpr.Fun.(*ast.Ident); ok && ident.Name == "recover" {
-			v.foundKeyword = "recover"
-			return nil
-		}
 	}
 
 	return v

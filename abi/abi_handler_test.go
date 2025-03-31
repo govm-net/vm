@@ -240,3 +240,87 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
 		t.Errorf("Generated code does not match expected:\nGot:\n%s\nExpected:\n%s", code, expectedCode)
 	}
 }
+
+func TestFindImportForType(t *testing.T) {
+	// 创建一个测试用的 ABI
+	abi := &ABI{
+		Imports: []Import{
+			{Path: "github.com/govm-net/vm/core", Name: "core"},
+			{Path: "github.com/govm-net/vm/types", Name: "vmtypes"},
+			{Path: "math/big"},
+		},
+	}
+	generator := NewHandlerGenerator(abi)
+
+	tests := []struct {
+		name     string
+		typeStr  string
+		wantPath string
+		wantName string
+	}{
+		{
+			name:     "basic type with alias",
+			typeStr:  "core.Context",
+			wantPath: "github.com/govm-net/vm/core",
+			wantName: "core",
+		},
+		{
+			name:     "pointer type with alias",
+			typeStr:  "*core.Context",
+			wantPath: "github.com/govm-net/vm/core",
+			wantName: "core",
+		},
+		{
+			name:     "array type with alias",
+			typeStr:  "[]vmtypes.Address",
+			wantPath: "github.com/govm-net/vm/types",
+			wantName: "vmtypes",
+		},
+		{
+			name:     "type without alias",
+			typeStr:  "big.Int",
+			wantPath: "math/big",
+			wantName: "",
+		},
+		{
+			name:     "pointer type without alias",
+			typeStr:  "*big.Int",
+			wantPath: "math/big",
+			wantName: "",
+		},
+		{
+			name:     "unknown type",
+			typeStr:  "unknown.Type",
+			wantPath: "",
+			wantName: "",
+		},
+		{
+			name:     "builtin type",
+			typeStr:  "string",
+			wantPath: "",
+			wantName: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generator.findImportForType(tt.typeStr)
+			if tt.wantPath == "" {
+				if got != nil {
+					t.Errorf("findImportForType() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Errorf("findImportForType() = nil, want %v", tt.wantPath)
+				return
+			}
+			if got.Path != tt.wantPath {
+				t.Errorf("findImportForType() path = %v, want %v", got.Path, tt.wantPath)
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("findImportForType() name = %v, want %v", got.Name, tt.wantName)
+			}
+		})
+	}
+}

@@ -62,9 +62,49 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	// 添加包名和导入
 	sb.WriteString(fmt.Sprintf("package %s\n\n", g.abi.PackageName))
 	sb.WriteString("import (\n")
+
+	// 添加基础导入
 	sb.WriteString("\t\"encoding/json\"\n")
 	sb.WriteString("\t\"fmt\"\n")
-	sb.WriteString("\t\"github.com/govm-net/vm/core\"\n")
+
+	// 收集所有需要的导入
+	imports := make(map[string]string) // path -> alias
+	for _, fn := range g.abi.Functions {
+		if !fn.IsExported {
+			continue
+		}
+
+		// 检查输入参数类型
+		for _, input := range fn.Inputs {
+			if imp := g.findImportForType(input.Type); imp != nil {
+				if imp.Name != "" {
+					imports[imp.Path] = imp.Name
+				} else {
+					imports[imp.Path] = ""
+				}
+			}
+		}
+
+		// 检查输出参数类型
+		for _, output := range fn.Outputs {
+			if imp := g.findImportForType(output.Type); imp != nil {
+				if imp.Name != "" {
+					imports[imp.Path] = imp.Name
+				} else {
+					imports[imp.Path] = ""
+				}
+			}
+		}
+	}
+
+	// 添加收集到的导入
+	for path, alias := range imports {
+		if alias != "" {
+			sb.WriteString(fmt.Sprintf("\t%s \"%s\"\n", alias, path))
+		} else {
+			sb.WriteString(fmt.Sprintf("\t\"%s\"\n", path))
+		}
+	}
 	sb.WriteString(")\n\n")
 
 	// 为每个导出函数生成参数结构体和 handler
@@ -77,6 +117,39 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	}
 
 	return sb.String()
+}
+
+// findImportForType 根据类型查找对应的导入
+func (g *HandlerGenerator) findImportForType(typeStr string) *Import {
+	// 处理指针类型
+	typeStr = strings.TrimPrefix(typeStr, "*")
+
+	// 处理数组类型
+	typeStr = strings.TrimPrefix(typeStr, "[]")
+
+	// 处理带包名的类型
+	if strings.Contains(typeStr, ".") {
+		parts := strings.Split(typeStr, ".")
+		pkgName := parts[0]
+
+		// 在导入列表中查找匹配的包
+		for _, imp := range g.abi.Imports {
+			// 如果导入有别名，检查别名是否匹配
+			if imp.Name == pkgName {
+				return &imp
+			}
+
+			// 如果没有别名，检查包路径的最后一部分是否匹配
+			if imp.Name == "" {
+				pathParts := strings.Split(imp.Path, "/")
+				if pathParts[len(pathParts)-1] == pkgName {
+					return &imp
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // generateParamStruct generates a parameter struct for a function

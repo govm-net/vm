@@ -8,7 +8,6 @@
 wasm/
 ├── contract.go           # 核心包装层，提供与主机环境的通信接口
 ├── counter_contract.go   # 计数器合约示例
-├── token_contract.go     # 代币合约示例
 └── README.md             # 使用说明文档
 ```
 
@@ -37,11 +36,38 @@ flowchart TD
 
 包装层的核心组件包括：
 
-1. **基本类型定义**：`Address`, `ObjectID` 等区块链基本类型
-2. **Context 接口实现**：提供区块链环境信息和操作方法
-3. **Object 接口实现**：提供状态对象的操作方法
-4. **内存管理函数**：处理WebAssembly内存分配和数据传递
-5. **主机函数调用**：包装主机环境提供的函数，处理调用参数和返回值
+1. **基本类型定义**：
+   - `Address`: 区块链地址类型
+   - `ObjectID`: 对象唯一标识符
+   - `ZeroAddress`: 空地址常量
+
+2. **Context 接口实现**：
+   - `Sender()`: 获取调用合约的账户地址
+   - `BlockHeight()`: 获取当前区块高度
+   - `BlockTime()`: 获取当前区块时间戳
+   - `ContractAddress()`: 获取当前合约地址
+   - `Balance(addr)`: 查询账户余额
+   - `Transfer(to, amount)`: 转账操作
+   - `Call(contract, function, args...)`: 跨合约调用
+   - `Log(event, keyValues...)`: 记录事件日志
+
+3. **Object 接口实现**：
+   - `ID()`: 获取对象ID
+   - `Owner()`: 获取对象所有者
+   - `SetOwner(owner)`: 设置对象所有者
+   - `Get(field, value)`: 获取对象字段值
+   - `Set(field, value)`: 设置对象字段值
+   - `Contract()`: 获取对象所属合约地址
+
+4. **内存管理**：
+   - `allocate(size)`: 分配内存
+   - `deallocate(ptr, size)`: 释放内存
+   - `readMemory(ptr, size)`: 读取内存数据
+   - `writeToMemory(data)`: 写入内存数据
+
+5. **主机函数调用**：
+   - `callHost(funcID, data)`: 与主机环境通信的核心函数
+   - `call_host_set/get_buffer`: WebAssembly导入函数
 
 ## 智能合约开发指南
 
@@ -53,7 +79,7 @@ flowchart TD
 package main
 
 import (
-    // 导入必要的包
+    "github.com/govm-net/vm/core"
 )
 
 // WebAssembly要求的main函数
@@ -67,27 +93,26 @@ func main() {
 所有大写字母开头的函数将被自动导出，可以在区块链上调用：
 
 ```go
-// 初始化函数 - 将在合约部署时自动调用
-func Initialize() int32 {
+// 初始化函数 - 需要用户主动调用以初始化合约状态
+// 建议在部署合约后立即调用此函数
+func Initialize(ctx core.Context) error {
     // 初始化合约状态
-    return 0
+    return nil
 }
 
 // 公开的业务函数
-func Transfer(to Address, amount uint64) bool {
+func Transfer(ctx core.Context, to core.Address, amount uint64) error {
     // 实现转账逻辑
-    return true
+    return ctx.Transfer(to, amount)
 }
 ```
 
 ### 3. 使用Context接口
 
-所有合约函数可以通过创建 `Context` 实例来访问区块链环境：
+所有合约函数都通过 `Context` 接口访问区块链环境：
 
 ```go
-func MyFunction() {
-    ctx := &Context{}
-    
+func MyFunction(ctx core.Context) {
     // 获取区块链信息
     height := ctx.BlockHeight()
     sender := ctx.Sender()
@@ -102,40 +127,29 @@ func MyFunction() {
 使用 `Object` 接口管理状态数据：
 
 ```go
-func StoreData(key string, value uint64) bool {
-    ctx := &Context{}
-    
-    // 创建或获取对象
+func StoreData(ctx core.Context, key string, value uint64) error {
+    // 创建对象，默认 owner 为合约地址
     obj := ctx.CreateObject()
     
-    // 设置所有者
-    obj.SetOwner(ctx.ContractAddress())
-    
     // 存储数据
-    err := obj.Set(key, value)
-    if err != nil {
-        return false
-    }
-    
-    return true
+    return obj.Set(key, value)
 }
 ```
 
 ### 5. 跨合约调用
 
-可以使用 `Call` 方法调用其他合约的函数：
+使用 `Call` 方法调用其他合约的函数：
 
 ```go
-func CallOtherContract(contractAddr Address) {
-    ctx := &Context{}
-    
+func CallOtherContract(ctx core.Context, contractAddr core.Address) error {
     // 调用其他合约的函数
     result, err := ctx.Call(contractAddr, "SomeFunction", arg1, arg2)
     if err != nil {
-        // 处理错误
+        return err
     }
     
     // 处理结果
+    return nil
 }
 ```
 
@@ -146,14 +160,13 @@ func CallOtherContract(contractAddr Address) {
 使用TinyGo编译合约为WebAssembly模块：
 
 ```bash
-tinygo build -o contract.wasm -target=wasi -opt=z -no-debug -gc=leaking ./my_contract.go
+tinygo build -o contract.wasm -target=wasi -opt=z -no-debug ./
 ```
 
 编译选项说明：
 - `-target=wasi`: 指定编译目标为WebAssembly系统接口
 - `-opt=z`: 优化输出大小
 - `-no-debug`: 移除调试信息
-- `-gc=leaking`: 使用简化的垃圾收集器，提高性能
 
 ### 部署合约
 
@@ -169,22 +182,34 @@ tinygo build -o contract.wasm -target=wasi -opt=z -no-debug -gc=leaking ./my_con
 - 获取当前计数器值
 - 重置计数器
 
-### 令牌合约
+### 其他示例
 
-`token_contract.go` 实现了标准的ERC20风格令牌合约，包括：
-- 初始化令牌信息
-- 查询余额
-- 转账
-- 铸造令牌
-- 销毁令牌
+请参考examples/contracts里面的例子
 
 ## 最佳实践
 
-1. **内存管理**：避免过多的内存分配，尽量重用缓冲区
-2. **错误处理**：总是检查返回的错误，并提供有意义的日志信息
-3. **安全检查**：验证调用权限和参数有效性
-4. **日志记录**：为重要操作记录事件，便于后续追踪
-5. **类型安全**：使用明确的类型转换，避免类型问题
+1. **内存管理**：
+   - 避免过多的内存分配，尽量重用缓冲区
+
+2. **错误处理**：
+   - 总是检查返回的错误
+   - 提供有意义的错误信息
+   - 使用 `Log` 记录重要操作
+
+3. **安全检查**：
+   - 验证调用权限
+   - 检查参数有效性
+   - 验证对象所有权
+
+4. **性能优化**：
+   - 使用缓存减少主机调用
+   - 批量处理数据
+   - 避免频繁的内存分配
+
+5. **类型安全**：
+   - 使用明确的类型转换
+   - 验证参数类型
+   - 处理边界情况
 
 ## 参考资料
 

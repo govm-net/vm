@@ -3,6 +3,9 @@
 package api
 
 import (
+	"fmt"
+	"go/ast"
+
 	"github.com/govm-net/vm/core"
 )
 
@@ -54,4 +57,25 @@ func DefaultContractConfig() ContractConfig {
 			// Additional allowed imports would be listed here
 		},
 	}
+}
+
+type IKeywordValidator func(node ast.Node) error
+
+var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
+	if node == nil {
+		return nil
+	}
+	switch node.(type) {
+	case *ast.GoStmt:
+		return fmt.Errorf("restricted keyword 'go' is not allowed")
+	case *ast.SelectStmt:
+		return fmt.Errorf("restricted keyword 'select' is not allowed")
+	case *ast.RangeStmt:
+		return fmt.Errorf("restricted keyword 'range' is not allowed")
+	case *ast.CallExpr:
+		if ident, ok := node.(*ast.CallExpr).Fun.(*ast.Ident); ok && ident.Name == "recover" {
+			return fmt.Errorf("restricted keyword 'recover' is not allowed")
+		}
+	}
+	return nil
 }
