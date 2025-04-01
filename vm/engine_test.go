@@ -104,6 +104,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeployContract() error = %v", err)
 	}
+	defer engine.DeleteContract(contractAddr)
 	if contractAddr == core.ZeroAddress {
 		t.Fatal("DeployContract() returned zero address")
 	}
@@ -150,4 +151,88 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	if err == nil {
 		t.Error("ExecuteContract with non-existent address should have returned error")
 	}
+}
+
+func TestEngine_DeployAndExecuteContract2(t *testing.T) {
+	// 创建临时目录
+	tmpDir, err := os.MkdirTemp("", "engine_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// 创建配置
+	config := &Config{
+		MaxContractSize:  1024 * 1024,
+		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
+		TinyGoPath:       "tinygo",
+		WASIOptions: WASIOptions{
+			MemoryLimit:      16 * 1024 * 1024,
+			TableSize:        100,
+			Timeout:          1000,
+			FuelLimit:        1000000,
+			StackSize:        1024,
+			EnableSIMD:       true,
+			EnableThreads:    false,
+			EnableBulkMemory: true,
+			PrecompiledCache: true,
+			CacheDir:         filepath.Join(tmpDir, "cache"),
+			LogLevel:         "info",
+		},
+	}
+
+	// 创建引擎实例
+	engine, err := NewEngine(config)
+	if err != nil {
+		t.Fatalf("NewEngine() error = %v", err)
+	}
+	defer engine.Close()
+
+	ctx := wasi.NewDefaultBlockchainContext()
+	engine = engine.WithContext(ctx)
+
+	// 测试合约代码
+	contractCode := counterContractCode
+
+	// 部署合约
+	contractAddr, err := engine.DeployContract(contractCode)
+	if err != nil {
+		t.Fatalf("DeployContract() error = %v", err)
+	}
+	defer engine.DeleteContract(contractAddr)
+	if contractAddr == core.ZeroAddress {
+		t.Fatal("DeployContract() returned zero address")
+	}
+
+	// 验证ABI文件是否创建
+	abiPath := filepath.Join(config.WASIContractsDir, fmt.Sprintf("%x.abi", contractAddr))
+	if _, err := os.Stat(abiPath); os.IsNotExist(err) {
+		t.Fatal("ABI file was not created")
+	}
+	ctx.SetExecutionContext(contractAddr, core.ZeroAddress)
+
+	// 执行Initialize函数
+	_, err = engine.ExecuteContract(contractAddr, "Initialize")
+	if err != nil {
+		t.Fatalf("ExecuteContract(Initialize) error = %v", err)
+	}
+
+	// 执行Increment函数
+	_, err = engine.ExecuteContract(contractAddr, "Increment", 5)
+	if err != nil {
+		t.Fatalf("ExecuteContract(Increment) error = %v", err)
+	}
+
+	// GetCounter
+	result, err := engine.ExecuteContract(contractAddr, "GetCounter")
+	if err != nil {
+		t.Fatalf("ExecuteContract(GetCounter) error = %v", err)
+	}
+	var hopeResult uint64
+	d, _ := json.Marshal(result)
+	json.Unmarshal(d, &hopeResult)
+	if hopeResult != 5 {
+		t.Errorf("GetCounter returned %d, want 5", hopeResult)
+	}
+
 }

@@ -156,12 +156,12 @@ type BlockchainContext interface {
 
 // Object 接口用于管理区块链状态对象
 type VMObject interface {
-	ID() ObjectID                // 获取对象ID
-	Owner() Address              // 获取对象所有者
-	Contract() Address           // 获取对象所属合约
-	SetOwner(addr Address) error // 设置对象所有者
+	ID() ObjectID                                  // 获取对象ID
+	Owner() Address                                // 获取对象所有者
+	Contract() Address                             // 获取对象所属合约
+	SetOwner(contract, sender, addr Address) error // 设置对象所有者
 
 	// 字段操作
-	Get(field string) ([]byte, error)     // 获取字段值
-	Set(field string, value []byte) error // 设置字段值
+	Get(contract Address, field string) ([]byte, error)             // 获取字段值
+	Set(contract, sender Address, field string, value []byte) error // 设置字段值
 }

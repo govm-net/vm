@@ -34,6 +34,7 @@ func TestNewWazeroVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeployContract() error = %v", err)
 	}
+	defer svm.DeleteContract(ctx, contractAddr)
 	ctx.SetExecutionContext(contractAddr, sender)
 
 	// 测试执行合约

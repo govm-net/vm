@@ -88,6 +88,14 @@ func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmC
 	return contractAddr, nil
 }
 
+// DeleteContract 删除WebAssembly合约
+func (vm *WazeroVM) DeleteContract(ctx types.BlockchainContext, contractAddr types.Address) {
+	vm.contractsLock.Lock()
+	defer vm.contractsLock.Unlock()
+	// 从合约映射中删除
+	delete(vm.contracts, contractAddr)
+}
+
 func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (api.Module, error) {
 	ctx1 := context.Background()
 	runtime := wazero.NewRuntime(ctx1)
@@ -387,13 +395,10 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 		if err != nil {
 			return -1
 		}
-		if obj.Contract() != params.Contract {
+		if obj.Owner() != params.Contract {
 			return -1
 		}
-		if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
-			return -1
-		}
-		err = obj.SetOwner(params.Owner)
+		err = obj.SetOwner(params.Contract, params.Sender, params.Owner)
 		if err != nil {
 			return -1
 		}
@@ -413,12 +418,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 			slog.Error("set_object_field 获取对象失败", "error", err)
 			return -1
 		}
-		if obj.Contract() != params.Contract {
-			slog.Error("set_object_field 对象归属错误", "contract", params.Contract, "object", obj.Contract())
-			return -1
-		}
-		if obj.Owner() != ctx.Sender() && obj.Owner() != params.Contract && obj.Owner() != params.Sender {
-			slog.Error("set_object_field 对象归属错误", "contract", params.Contract, "object", obj.Owner(), "sender", ctx.Sender())
+		if obj.Owner() != params.Contract {
 			return -1
 		}
 		// 将value转换为[]byte
@@ -427,7 +427,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 			slog.Error("set_object_field 序列化失败", "error", err)
 			return -1
 		}
-		err = obj.Set(params.Field, valueBytes)
+		err = obj.Set(params.Contract, params.Sender, params.Field, valueBytes)
 		if err != nil {
 			slog.Error("set_object_field 设置字段失败", "error", err)
 			return -1
@@ -479,7 +479,7 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 			fmt.Printf("obj.getfield 获取对象失败:id:%x, %v\n", params.ID, err)
 			return -1
 		}
-		data, err := obj.Get(params.Field)
+		data, err := obj.Get(params.Contract, params.Field)
 		if err != nil {
 			fmt.Printf("obj.getfield 获取字段失败:id:%x, %v\n", params.ID, err)
 			return -1

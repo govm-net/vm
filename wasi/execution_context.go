@@ -117,10 +117,10 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 
 	// 返回对象封装
 	return &vmObject{
-		objects:        ctx.objects,
-		objectOwner:    ctx.objectOwner,
-		objectContract: ctx.objectContract,
-		id:             id,
+		ctx:         ctx,
+		objOwner:    ctx.Sender(),
+		objContract: contract,
+		id:          id,
 	}, nil
 }
 
@@ -133,10 +133,10 @@ func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, 
 
 	// 返回对象封装
 	return &vmObject{
-		objects:        ctx.objects,
-		objectOwner:    ctx.objectOwner,
-		objectContract: ctx.objectContract,
-		id:             id,
+		ctx:         ctx,
+		objOwner:    contract,
+		objContract: contract,
+		id:          id,
 	}, nil
 }
 
@@ -157,10 +157,10 @@ func (ctx *defaultBlockchainContext) GetObject(contract types.Address, id core.O
 	}
 
 	return &vmObject{
-		objects:        ctx.objects,
-		objectOwner:    ctx.objectOwner,
-		objectContract: ctx.objectContract,
-		id:             id,
+		ctx:         ctx,
+		objOwner:    ctx.objectOwner[id],
+		objContract: ctx.objectContract[id],
+		id:          id,
 	}, nil
 }
 
@@ -169,10 +169,10 @@ func (ctx *defaultBlockchainContext) GetObjectWithOwner(contract, owner types.Ad
 	for id, objOwner := range ctx.objectOwner {
 		if objOwner == owner {
 			return &vmObject{
-				objects:        ctx.objects,
-				objectOwner:    ctx.objectOwner,
-				objectContract: ctx.objectContract,
-				id:             id,
+				ctx:         ctx,
+				objOwner:    objOwner,
+				objContract: ctx.objectContract[id],
+				id:          id,
 			}, nil
 		}
 	}
@@ -202,12 +202,33 @@ func (ctx *defaultBlockchainContext) Log(contract types.Address, eventName strin
 	slog.Info("Contract log", params...)
 }
 
+func (ctx *defaultBlockchainContext) setObjectOwner(id core.ObjectID, owner types.Address) {
+	ctx.objectOwner[id] = owner
+}
+
+func (ctx *defaultBlockchainContext) setObjectField(id core.ObjectID, field string, value any) {
+	obj, exists := ctx.objects[id]
+	if !exists {
+		obj = make(map[string]any)
+	}
+	obj[field] = value
+	ctx.objects[id] = obj
+}
+
+func (ctx *defaultBlockchainContext) getObjectField(id core.ObjectID, field string) any {
+	obj, exists := ctx.objects[id]
+	if !exists {
+		return nil
+	}
+	return obj[field]
+}
+
 // vmObject 实现了对象接口
 type vmObject struct {
-	objects        map[core.ObjectID]map[string]any
-	objectOwner    map[core.ObjectID]types.Address
-	objectContract map[core.ObjectID]types.Address
-	id             core.ObjectID
+	ctx         *defaultBlockchainContext
+	objOwner    types.Address
+	objContract types.Address
+	id          core.ObjectID
 }
 
 // ID 获取对象ID
@@ -217,29 +238,25 @@ func (o *vmObject) ID() core.ObjectID {
 
 // Owner 获取对象所有者
 func (o *vmObject) Owner() types.Address {
-	return o.objectOwner[o.id]
+	return o.objOwner
 }
 
 // Contract 获取对象所属合约
 func (o *vmObject) Contract() types.Address {
-	return o.objectContract[o.id]
+	return o.objContract
 }
 
 // SetOwner 设置对象所有者
-func (o *vmObject) SetOwner(addr types.Address) error {
-	o.objectOwner[o.id] = addr
+func (o *vmObject) SetOwner(contract, sender types.Address, addr types.Address) error {
+	o.objOwner = addr
+	o.ctx.setObjectOwner(o.id, addr)
 	return nil
 }
 
 // Get 获取字段值
-func (o *vmObject) Get(field string) ([]byte, error) {
-	obj, exists := o.objects[o.id]
-	if !exists {
-		return nil, errors.New("对象不存在")
-	}
-
-	fieldValue, exists := obj[field]
-	if !exists {
+func (o *vmObject) Get(contract types.Address, field string) ([]byte, error) {
+	fieldValue := o.ctx.getObjectField(o.id, field)
+	if fieldValue == nil {
 		return nil, errors.New("字段不存在")
 	}
 
@@ -252,17 +269,7 @@ func (o *vmObject) Get(field string) ([]byte, error) {
 }
 
 // Set 设置字段值
-func (o *vmObject) Set(field string, value []byte) error {
-	obj, exists := o.objects[o.id]
-	if !exists {
-		return errors.New("对象不存在")
-	}
-
-	var fieldValue any
-	if err := json.Unmarshal(value, &fieldValue); err != nil {
-		return fmt.Errorf("反序列化失败: %w", err)
-	}
-
-	obj[field] = fieldValue
+func (o *vmObject) Set(contract types.Address, sender types.Address, field string, value []byte) error {
+	o.ctx.setObjectField(o.id, field, value)
 	return nil
 }

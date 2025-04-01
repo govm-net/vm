@@ -98,6 +98,10 @@ func TestCompileContract(t *testing.T) {
 	if err == nil {
 		t.Errorf("Invalid contract should fail compilation")
 	}
+	err = maker.ValidateContract(invalidContract)
+	if err == nil {
+		t.Errorf("Invalid contract should fail validation")
+	}
 }
 
 func TestValidateNoMaliciousCommands(t *testing.T) {

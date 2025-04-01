@@ -274,11 +274,6 @@ func (m *Maker) validateNoMaliciousCommands(file *ast.File) error {
 
 // CompileContract compiles the given contract source code.
 func (m *Maker) CompileContract(code []byte) ([]byte, error) {
-	// First validate the contract
-	if err := m.ValidateContract(code); err != nil {
-		return nil, err
-	}
-
 	// 1. 提取代码的abi
 	abiInfo, err := abi.ExtractABI(code)
 	if err != nil {

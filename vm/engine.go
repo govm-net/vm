@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
+	"github.com/govm-net/vm/abi"
 	"github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/compiler"
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/mock"
 	"github.com/govm-net/vm/types"
 	"github.com/govm-net/vm/wasi"
 )
@@ -19,8 +20,6 @@ type Engine struct {
 	config        *Config
 	maker         *compiler.Maker
 	wazero_engine *wasi.WazeroVM
-	contracts     map[core.Address][]byte
-	contractsLock sync.RWMutex
 	ctx           types.BlockchainContext // 区块链上下文
 }
 
@@ -88,7 +87,6 @@ func NewEngine(config *Config) (*Engine, error) {
 		config:        config,
 		maker:         maker,
 		wazero_engine: wazero_engine,
-		contracts:     make(map[core.Address][]byte),
 		ctx:           wasi.NewDefaultBlockchainContext(),
 	}, nil
 }
@@ -138,6 +136,12 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 		return core.ZeroAddress, fmt.Errorf("contract validation failed: %w", err)
 	}
 
+	// 添加gas消耗
+	code, err := mock.AddGasConsumption(code)
+	if err != nil {
+		return core.ZeroAddress, fmt.Errorf("failed to add gas consumption: %w", err)
+	}
+
 	// 编译合约
 	wasmCode, err := e.maker.CompileContract(code)
 	if err != nil {
@@ -150,13 +154,8 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 		return core.ZeroAddress, fmt.Errorf("contract deployment failed: %w", err)
 	}
 
-	// 保存合约代码
-	e.contractsLock.Lock()
-	e.contracts[contractAddr] = wasmCode
-	e.contractsLock.Unlock()
-
 	// 解析合约代码获取ABI信息
-	abi, err := e.maker.ParseABI(code)
+	abi, err := abi.ExtractABI(code)
 	if err != nil {
 		return contractAddr, fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
@@ -176,17 +175,12 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 	return contractAddr, nil
 }
 
+func (e *Engine) DeleteContract(contractAddr core.Address) {
+	e.wazero_engine.DeleteContract(e.ctx, contractAddr)
+}
+
 // ExecuteContract 执行合约函数
 func (e *Engine) ExecuteContract(contractAddr core.Address, function string, args ...interface{}) (interface{}, error) {
-	// 获取合约代码
-	e.contractsLock.RLock()
-	_, exists := e.contracts[contractAddr]
-	e.contractsLock.RUnlock()
-
-	if !exists {
-		return nil, fmt.Errorf("contract not found: %s", contractAddr)
-	}
-
 	// 读取合约ABI文件
 	abiPath := filepath.Join(e.config.WASIContractsDir, fmt.Sprintf("%x.abi", contractAddr))
 	abiData, err := os.ReadFile(abiPath)
@@ -195,20 +189,32 @@ func (e *Engine) ExecuteContract(contractAddr core.Address, function string, arg
 	}
 
 	// 解析ABI JSON
-	var abi map[string]compiler.FunctionInfo
-	if err := json.Unmarshal(abiData, &abi); err != nil {
+	var abiInfo abi.ABI
+	if err := json.Unmarshal(abiData, &abiInfo); err != nil {
 		return nil, fmt.Errorf("failed to parse ABI JSON: %w", err)
+	}
+	var funcInfo abi.Function
+	for _, fn := range abiInfo.Functions {
+		if fn.Name == function {
+			funcInfo = fn
+			break
+		}
 	}
 
 	// 验证函数是否存在
-	if _, ok := abi[function]; !ok {
+	if funcInfo.Name == "" {
 		return nil, fmt.Errorf("function %s not found in contract", function)
 	}
+	fArgs := funcInfo.Inputs
 
-	// 将参数转换为map
 	params := make(map[string]interface{})
+	// 如果函数第一个参数是core.Context，且入参长度少于需要的参数，则添加nil作为第一个参数，否则匹配错误
+	if len(fArgs) > len(args) && fArgs[0].Type == "core.Context" {
+		args = append([]any{nil}, args...)
+	}
+	// 将参数转换为map
 	for i, arg := range args {
-		params[abi[function].Args[i].Name] = arg
+		params[fArgs[i].Name] = arg
 	}
 
 	// 将参数转换为JSON
@@ -222,15 +228,6 @@ func (e *Engine) ExecuteContract(contractAddr core.Address, function string, arg
 
 // ExecuteContract 执行合约函数带原始参数，参数是json.marshal(map[string]any)
 func (e *Engine) Execute(contractAddr core.Address, function string, args []byte) (interface{}, error) {
-	// 获取合约代码
-	e.contractsLock.RLock()
-	_, exists := e.contracts[contractAddr]
-	e.contractsLock.RUnlock()
-
-	if !exists {
-		return nil, fmt.Errorf("contract not found: %s", contractAddr)
-	}
-
 	// 执行合约函数
 	return e.wazero_engine.ExecuteContract(e.ctx, contractAddr, function, args)
 }
