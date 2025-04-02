@@ -394,7 +394,6 @@ func (e *Engine) compileWithTinyGo(dir string, options DeployOptions) ([]byte, e
         "-target=wasi",
         "-opt=z", // 优化大小
         "-no-debug",
-        "-gc=leaking", // 简化的垃圾回收
         "./main.go",
     }
     
@@ -420,7 +419,6 @@ func (e *Engine) compileWithTinyGo(dir string, options DeployOptions) ([]byte, e
 - `-target=wasi`: 指定目标为 WebAssembly 系统接口
 - `-opt=z`: 优化编译结果，减小 WASM 模块大小
 - `-no-debug`: 删除调试信息，减小文件体积
-- `-gc=leaking`: 使用简化的垃圾回收机制，提高性能
 
 ### 7. 优化和验证 WASM 模块
 
@@ -783,7 +781,7 @@ config.WASIOptions.LogLevel = "trace"
 使用 TinyGo 优化参数：
 
 ```bash
-tinygo build -o contract.wasm -target=wasi -opt=z -no-debug -gc=leaking contract.go
+tinygo build -o contract.wasm -target=wasi -opt=z -no-debug contract.go
 ```
 
 ### 内存优化

@@ -264,91 +264,54 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
     
     ptr, size, errCode := callHost(FuncCall, data)
     if errCode != 0 {
-        return nil, fmt.Errorf("contract call failed with code: %d", errCode)
+        return nil, fmt.Errorf("call failed with code: %d", errCode)
     }
     
     return readMemory(ptr, size), nil
 }
-
-func (c *Context) CreateObject() Object {
-    // 创建新对象 - 基础状态操作，失败时会panic
-    
-    // 调用主机函数创建对象
-    ptr, size, errCode := callHost(FuncCreateObject, nil)
-    if errCode != 0 {
-        panic(fmt.Sprintf("failed to create object with code: %d", errCode))
-    }
-    
-    // 解析对象ID
-    idData := readMemory(ptr, size)
-    var id ObjectID
-    copy(id[:], idData)
-    
-    // 返回对象包装器
-    return &Object{id: id}
-}
-
-func (c *Context) DeleteObject(id ObjectID) {
-    // 删除对象 - 基础状态操作，失败时会panic
-    data, err := writeToMemory(id)
-    if err != nil {
-        panic(fmt.Sprintf("failed to serialize object ID: %v", err))
-    }
-    
-    _, _, errCode := callHost(FuncDeleteObject, data)
-    if errCode != 0 {
-        panic(fmt.Sprintf("failed to delete object with code: %d", errCode))
-    }
-    
-    // 操作成功，无需返回值
-}
-
-// ...其他 Context 方法
 ```
 
 ### 2.5 Object 接口实现
 
-Object 接口提供状态对象的操作方法：
-
-1. 合约只能看到属于当前合约的Object（实现的时候有Type=ContractAddress）
-2. 合约可以查看当前用户和其他用户的Object
-3. 合约只能编辑Owner为Sender/Contract的Object
+Object 接口提供统一的对象状态管理能力：
 
 ```go
 // Object 接口定义
 type Object interface {
-    ID() ObjectID           // 获取对象ID
-    Owner() Address         // 获取对象所有者
-    SetOwner(addr Address)  // 设置对象所有者，失败时panic
+    // 元数据方法
+    ID() ObjectID                    // 获取对象唯一ID
+    Contract() Address               // 获取所属合约地址
+    Owner() Address                  // 获取所有者地址
+    SetOwner(owner Address) error    // 设置所有者地址
     
-    // 字段操作
-    Get(field string, value any) error  // 获取字段值
-    Set(field string, value any) error  // 设置字段值
+    // 状态访问方法
+    Get(field string, value any) error    // 获取指定字段值
+    Set(field string, value any) error    // 设置指定字段值
 }
 
 // Object 实现
 func (o *Object) ID() ObjectID {
-    // 获取对象ID
     return o.id
 }
 
-func (o *Object) Owner() Address {
-    // 获取对象所有者
-    data, err := writeToMemory(o.id)
-    if err != nil {
-        return Address{}
-    }
-    
-    ptr, size, _ := callHost(FuncGetObjectOwner, data)
-    ownerData := readMemory(ptr, size)
-    var owner Address
-    copy(owner[:], ownerData)
-    return owner
+func (o *Object) Contract() Address {
+    ptr, size, _ := callHost(FuncGetObjectContract, o.id[:])
+    data := readMemory(ptr, size)
+    var addr Address
+    copy(addr[:], data)
+    return addr
 }
 
-func (o *Object) SetOwner(owner Address) {
-    // 设置对象所有者 - 基础状态操作，失败时会panic
-    ownerData := struct {
+func (o *Object) Owner() Address {
+    ptr, size, _ := callHost(FuncGetObjectOwner, o.id[:])
+    data := readMemory(ptr, size)
+    var addr Address
+    copy(addr[:], data)
+    return addr
+}
+
+func (o *Object) SetOwner(owner Address) error {
+    setOwnerData := struct {
         ID    ObjectID
         Owner Address
     }{
@@ -356,22 +319,22 @@ func (o *Object) SetOwner(owner Address) {
         Owner: owner,
     }
     
-    data, err := writeToMemory(ownerData)
+    data, err := writeToMemory(setOwnerData)
     if err != nil {
-        panic(fmt.Sprintf("failed to serialize data: %v", err))
+        return err
     }
     
     _, _, errCode := callHost(FuncSetObjectOwner, data)
     if errCode != 0 {
-        panic(fmt.Sprintf("set owner failed with code: %d", errCode))
+        return fmt.Errorf("set owner failed with code: %d", errCode)
     }
     
-    // 操作成功，无需返回值
+    return nil
 }
 
 func (o *Object) Get(field string, value any) error {
-    // 获取对象字段值
-    getData := struct {
+    // 获取字段值
+    request := struct {
         ID    ObjectID
         Field string
     }{
@@ -513,255 +476,224 @@ sequenceDiagram
 - 通过缓冲区返回详细错误信息
 - 主机函数检查参数有效性和内存安全
 
-## 5. 安全考虑
+## 5. Gas计费机制
+
+WebAssembly智能合约使用精确的Gas计费机制来控制资源消耗，确保合约执行的安全和可预测性。
+
+### 5.1 计费原理
+
+Gas计费系统采用双重计费策略：
+
+#### 5.1.1 代码行计费
+
+在合约编译过程中，系统会自动分析Go代码的控制流结构，并在适当位置注入Gas消耗代码：
+
+```go
+// 原始合约代码
+func TransferToken(ctx core.Context, to Address, amount uint64) error {
+    if amount <= 0 {
+        return errors.New("amount must be positive")
+    }
+    
+    sender := ctx.Sender()
+    return ctx.Transfer(to, amount)
+}
+
+// 注入Gas计费后的代码
+func TransferToken(ctx core.Context, to Address, amount uint64) error {
+    mock.ConsumeGas(1)  // 消耗当前语句的gas
+    if amount <= 0 {
+        mock.ConsumeGas(1)  // if块内的语句消耗
+        return errors.New("amount must be positive")
+    }
+    
+    mock.ConsumeGas(2)  // 后续两行代码消耗
+    sender := ctx.Sender()
+    return ctx.Transfer(to, amount)
+}
+```
+
+系统会识别基本代码块，并在每个块的开始处注入相应的Gas消耗代码。
+
+#### 5.1.2 接口调用计费
+
+除了基本的代码行计费外，所有Context和Object接口的调用都会消耗额外的Gas：
+
+```go
+// Context接口计费示例
+func (c *Context) Sender() Address {
+    mock.ConsumeGas(10)  // Sender操作固定消耗10 gas
+    // ... 实际逻辑 ...
+}
+
+func (c *Context) Transfer(to Address, amount uint64) error {
+    mock.ConsumeGas(500)  // Transfer操作固定消耗500 gas
+    // ... 实际逻辑 ...
+}
+
+// Object接口计费示例
+func (o *Object) Set(field string, value any) error {
+    mock.ConsumeGas(1000)  // Set基础操作消耗1000 gas
+    // ... 序列化 ...
+    bytes, err := any2bytes(request)
+    // ... 
+    mock.ConsumeGas(int64(len(bytes)) * 100)  // 根据数据大小额外计费
+    // ... 实际逻辑 ...
+}
+```
+
+### 5.2 Gas消耗值
+
+Context和Object接口的标准Gas消耗值：
+
+| 接口 | 操作 | Gas消耗 |
+|-----|-----|---------|
+| **Context** | Sender() | 10 gas |
+| | BlockHeight() | 10 gas |
+| | BlockTime() | 10 gas |
+| | ContractAddress() | 10 gas |
+| | Balance(addr) | 50 gas |
+| | Transfer(to, amount) | 500 gas |
+| | Call(contract, function, args...) | 10000 gas + 被调用合约消耗 |
+| | CreateObject() | 50 gas |
+| | GetObject(id) | 50 gas |
+| | GetObjectWithOwner(owner) | 50 gas |
+| | DeleteObject(id) | 500 gas |
+| | Log(event, keyValues...) | 100 gas + 数据长度 |
+| **Object** | ID() | 10 gas |
+| | Contract() | 100 gas |
+| | Owner() | 100 gas |
+| | SetOwner(owner) | 500 gas |
+| | Get(field, value) | 100 gas + 结果数据大小 |
+| | Set(field, value) | 1000 gas + 数据大小 * 100 gas |
+
+### 5.3 特殊计费规则
+
+某些操作有特殊的计费规则：
+
+#### 5.3.1 合约调用Gas预留
+
+当使用`Call`方法调用其他合约时，系统会预留10000 gas作为基本调用费用，并将剩余gas分配给被调用合约：
+
+```go
+// Call方法的Gas处理
+func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
+    // 预留基本调用费用
+    mock.ConsumeGas(10000)
+    
+    // 构造调用参数，分配剩余gas给被调用合约
+    callData := types.CallParams{
+        Contract: contract,
+        Function: function,
+        Args:     args,
+        Caller:   c.ContractAddress(),
+        GasLimit: mock.GetGas(), // 分配剩余的gas
+    }
+    
+    // ... 调用逻辑 ...
+    
+    // 实际消耗 = 10000 (基本费用) + 被调用合约实际消耗
+    return result, nil
+}
+```
+
+#### 5.3.2 数据大小相关计费
+
+对于涉及数据处理的操作，额外的Gas消耗与数据大小相关：
+
+- **Object.Set()**: 基础消耗1000 gas + 数据大小 * 100 gas
+- **Object.Get()**: 基础消耗100 gas + 结果数据大小 gas
+- **Context.Log()**: 基础消耗100 gas + 日志数据长度 gas
+
+### 5.4 Gas控制API
+
+合约可以通过mock包提供的Gas控制API进行Gas管理：
+
+```go
+import "github.com/govm-net/vm/mock"
+
+// 初始化Gas（通常由系统自动调用）
+mock.InitGas(1000000)
+
+// 获取当前剩余Gas
+remainingGas := mock.GetGas()
+
+// 获取已使用Gas
+usedGas := mock.GetUsedGas()
+
+// 手动消耗Gas（通常由自动注入的代码调用）
+mock.ConsumeGas(100)
+
+// 退还Gas（特定场景如删除存储时使用）
+mock.RefundGas(50)
+
+// 重置Gas计数（通常由系统在合约调用开始时调用）
+mock.ResetGas(500000)
+```
+
+## 6. 安全考虑
 
 WebAssembly 智能合约接口系统实现了多层安全机制：
 
-### 5.1 内存安全
+### 6.1 内存安全
 
 - **边界检查**：对所有内存访问进行严格的边界检查
 - **指针验证**：验证传递的内存指针的有效性
 - **内存隔离**：合约只能访问自己的内存空间
 - **内存分配控制**：通过导出的分配函数管理内存使用
 
-### 5.2 资源控制
+### 6.2 资源控制
 
 - **内存限制**：设置WebAssembly实例可使用的最大内存
 - **执行时间控制**：可实现执行超时机制
 - **指令计数**：可引入指令计数机制限制执行步骤
 
-## 6. 默认Object和状态存储
-
-每个WebAssembly智能合约在部署时会自动获得一个默认的Object，作为合约状态的主要存储位置。这种设计提供了一个标准的状态持久化机制，避免依赖全局变量。
-
-### 6.1 默认Object特性
-
-- **自动创建**：每个合约在部署时系统自动创建
-- **通过空ID访问**：虽然有真实的唯一ID，但可以通过空ObjectID（全为0的字节数组）访问
-- **初始所有权**：默认情况下，所有者是合约地址本身
-- **可转移所有权**：与其他对象一样，可以通过SetOwner方法转移所有权
-- **持久化存储**：数据在合约调用间保持不变
-
-### 6.2 访问默认Object
-
-合约代码可以通过以下方式访问默认Object：
-
-```go
-// 获取合约的默认Object
-func getDefaultObject(ctx core.Context) core.Object {
-    // 使用空ObjectID获取默认对象
-    emptyID := core.ObjectID{} // 全为0的ObjectID
-    return ctx.GetObject(emptyID)
-}
-```
-
-### 6.3 所有权管理
-
-默认Object的所有权可以转移，这提供了灵活的权限管理机制：
-
-```go
-// 转移默认Object的所有权
-func transferDefaultObjectOwnership(ctx core.Context, newOwner Address) bool {
-    // 获取默认对象
-    defaultObj := ctx.GetObject(ObjectID{})
-    
-    // 检查当前调用者是否为所有者
-    currentOwner := defaultObj.Owner()
-    if ctx.Sender() != currentOwner {
-        ctx.Log("error", "message", "只有当前所有者可以转移所有权")
-        return false
-    }
-    
-    // 转移所有权
-    defaultObj.SetOwner(newOwner)
-    ctx.Log("ownership_transferred", "from", currentOwner, "to", newOwner)
-    return true
-}
-```
-
-需要注意的是，一旦转移了默认Object的所有权，合约本身将不再能够修改它，除非新所有者允许。这可以用于实现高级的权限控制或合约升级机制。
-
-### 6.4 使用场景
-
-默认Object的主要用途包括：
-
-1. **存储合约配置**：存储合约的不可变或很少变化的配置数据
-2. **保存全局状态**：替代全局变量存储合约的运行状态
-3. **维护索引和引用**：保存对其他对象的引用和索引
-4. **权限控制**：通过所有权转移实现管理权限的变更
-5. **合约升级**：通过转移关键对象的所有权实现合约逻辑的升级
-
-### 6.5 使用示例
-
-以下是使用默认Object存储合约全局状态的示例：
-
-```go
-// 初始化合约
-func Initialize(ctx core.Context, name string, symbol string) int32 {
-    // 获取默认Object
-    defaultObj := ctx.GetObject(ObjectID{})
-    
-    // 存储合约基本信息
-    err = defaultObj.Set("name", name)
-    if err != nil {
-        ctx.Log("error", "message", "无法设置名称")
-        return -1
-    }
-    
-    err = defaultObj.Set("symbol", symbol)
-    if err != nil {
-        ctx.Log("error", "message", "无法设置符号")
-        return -1
-    }
-    
-    ctx.Log("initialize", "name", name, "symbol", symbol)
-    return 0
-}
-
-// 获取合约名称
-func GetName(ctx core.Context) string {
-    // 获取默认Object
-    defaultObj := ctx.GetObject(ObjectID{})
-    
-    // 读取名称
-    var name string
-    err = defaultObj.Get("name", &name)
-    if err != nil {
-        return ""
-    }
-    
-    return name
-}
-```
-
-### 6.6 状态管理方式的比较
-
-| 状态管理方式 | 优点                               | 缺点                     |
-| ------------ | ---------------------------------- | ------------------------ |
-| 默认Object   | 自动创建、简单直接、无需额外ID管理 | 所有数据集中在一个对象   |
-| 自定义多对象 | 数据分散存储、更好的组织结构       | 需要管理多个对象ID       |
-| 全局变量     | 访问简单、无需序列化               | 状态不持久、每次执行重置 |
-
-默认Object提供了全局变量的便捷性和区块链存储的持久性，是小型合约或简单状态管理的理想选择。
-
-### 6.7 Context使用最佳实践
-
-智能合约中的Context对象是连接合约代码与区块链环境的桥梁，它提供了访问区块链状态和功能的标准接口。为了确保合约状态一致性和正确的执行环境，应当遵循以下最佳实践：
-
-#### 6.7.1 Context作为参数传递
-
-**重要原则**: Context应该作为参数传递给合约函数，而不是在函数内部创建。
-
-```go
-// ✅ 推荐：Context作为参数传递
-func Transfer(ctx core.Context, to Address, amount uint64) bool {
-    // 使用传入的ctx访问区块链状态
-    sender := ctx.Sender()
-    // ...其他逻辑
-}
-
-// ❌ 禁止：在函数内部创建Context
-func Transfer(to Address, amount uint64) bool {
-    ctx := &Context{} // 不要这样做！
-    // ...其他逻辑
-}
-```
-
-#### 6.7.2 Context参数传递的好处
-
-将Context作为参数传递而非在函数内部创建有以下优势：
-
-1. **状态一致性**：确保整个交易过程中使用同一个执行上下文，保持状态一致
-2. **调用链完整性**：系统可以正确跟踪并记录合约调用链，便于审计和调试
-3. **资源控制**：允许系统对整个执行路径进行统一的资源计量和限制
-4. **依赖注入**：便于测试，可以注入模拟的Context进行单元测试
-5. **执行环境继承**：确保子调用继承父调用的执行环境特性
-
-#### 6.7.3 辅助函数中的Context传递
-
-在合约内部的辅助函数中，也应当保持Context参数的传递模式：
-
-```go
-// 公开的合约函数
-func Mint(ctx core.Context, to Address, amount uint64) bool {
-    // 验证权限
-    if !isAuthorized(ctx, ctx.Sender()) {
-        return false
-    }
-    
-    // 调用辅助函数时传递Context
-    return updateBalance(ctx, to, amount)
-}
-
-// 内部辅助函数
-func updateBalance(ctx core.Context, account Address, amount uint64) bool {
-    // 使用传入的Context进行状态访问
-    // ...
-}
-```
-
-#### 6.7.4 跨合约调用中的Context处理
-
-在进行跨合约调用时，系统会自动处理Context的传递和调用链信息的维护：
-
-```go
-// 在合约A中调用合约B
-func CallOtherContract(ctx core.Context, targetContract Address) {
-    // 调用其他合约时，系统会自动处理Context传递
-    result, err := ctx.Call(targetContract, "SomeFunction", arg1, arg2)
-    // ...
-}
-
-// 在合约B中被调用的函数
-func SomeFunction(ctx core.Context, arg1 string, arg2 uint64) {
-    // ctx中包含了调用者信息
-    caller := ctx.Sender() // 返回合约A的地址
-    // ...
-}
-```
-
-```go
-import "github.com/.../contractB"
-// 在合约A中直接调用合约B
-func CallOtherContract(ctx core.Context, targetContract Address) {
-    // 调用其他合约时，系统会自动处理Context传递
-    contractB.SomeFunction(arg1, arg2)
-    // ...
-}
-
-// 在合约B中被调用的函数
-func SomeFunction(ctx core.Context, arg1 string, arg2 uint64) {
-    // ctx中包含了调用者信息
-    caller := ctx.Sender() // 返回合约A的地址
-    // ...
-}
-```
-
-智能合约开发者应当始终遵循这种Context传递模式，以确保合约执行的正确性、一致性和可维护性。
-
-## 7. 系统调用分类
-
-WebAssembly智能合约接口系统提供以下几类系统调用：
-
-| 功能类别   | 描述                | 示例函数                                |
-| ---------- | ------------------- | --------------------------------------- |
-| 上下文信息 | 获取区块链环境信息  | GetSender, GetBlockHeight, GetBlockTime |
-| 账户操作   | 管理账户余额和转账  | GetBalance, Transfer                    |
-| 对象管理   | 创建和管理状态对象  | CreateObject, GetObject, DeleteObject   |
-| 合约调用   | 调用其他合约        | Call                                    |
-| 日志与事件 | 记录合约执行事件    | Log                                     |
-| 内存管理   | 管理WebAssembly内存 | allocate, deallocate                    |
-
-## 8. 优化技术
+## 7. 性能优化
 
 系统采用了多种优化技术提高性能：
 
-### 8.1 内存优化
+### 7.1 内存优化
 
 - **共享缓冲区**：使用预分配的共享缓冲区减少内存分配
 - **内存复用**：减少内存分配和拷贝操作
 - **序列化优化**：高效的二进制序列化格式
-- **TinyGo内存管理**：合约使用 TinyGo 的 `-gc=leaking` 简化垃圾收集机制提高性能
+- **TinyGo内存管理**：合约使用TinyGo的垃圾收集机制，通过预分配和内存复用优化性能
+
+## 8. 接口扩展
+
+系统提供了多种扩展接口，以满足不同业务需求：
+
+### 8.1 日志与事件
+
+系统提供了日志与事件接口，用于记录合约执行过程中的关键事件：
+
+```go
+// 日志接口定义
+type Logger interface {
+    Log(eventName string, keyValues ...interface{})
+}
+
+// 日志实现
+func (c *Context) Log(eventName string, keyValues ...interface{}) {
+    // 调用日志接口记录事件
+}
+```
+
+### 8.2 跨合约调用
+
+系统提供了跨合约调用接口，允许合约之间进行安全的交互：
+
+```go
+// 跨合约调用接口定义
+type Caller interface {
+    Call(contract Address, function string, args ...any) ([]byte, error)
+}
+
+// 跨合约调用实现
+func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
+    // 调用跨合约调用接口
+}
+```
 
 ## 9. 最佳实践
 
@@ -787,4 +719,4 @@ WebAssembly智能合约接口系统为Go语言编写的智能合约提供了高�
 - 可控的资源使用
 - 强大的跨合约调用能力
 
-系统的模块化设计使其易于扩展和适应不同的区块链环境，同时保持核心接口的稳定性，为智能合约开发者提供一致的开发体验。 
+系统的模块化设计使其易于扩展和适应不同的区块链环境，同时保持核心接口的稳定性，为智能合约开发者提供一致的开发体验。

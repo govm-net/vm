@@ -72,6 +72,8 @@ var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
 		return fmt.Errorf("restricted keyword 'select' is not allowed")
 	case *ast.RangeStmt:
 		return fmt.Errorf("restricted keyword 'range' is not allowed")
+	case *ast.ChanType:
+		return fmt.Errorf("restricted keyword 'chan' is not allowed")
 	case *ast.CallExpr:
 		if ident, ok := node.(*ast.CallExpr).Fun.(*ast.Ident); ok && ident.Name == "recover" {
 			return fmt.Errorf("restricted keyword 'recover' is not allowed")

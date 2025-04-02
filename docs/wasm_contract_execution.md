@@ -120,14 +120,13 @@ wasmCode, err := compileWithTinyGo(tempDir, options.WASIOptions)
 
 编译命令示例：
 ```bash
-tinygo build -o contract.wasm -target=wasi -opt=z -no-debug -gc=leaking ./main.go
+tinygo build -o contract.wasm -target=wasi -opt=z -no-debug ./main.go
 ```
 
 编译选项说明：
 - `-target=wasi`: 指定编译目标为 WebAssembly 系统接口
 - `-opt=z`: 优化输出大小，减小 WASM 模块体积
 - `-no-debug`: 移除调试信息，进一步减小文件大小
-- `-gc=leaking`: 使用简化的垃圾收集器，提高运行时性能
 
 ### 2.7 模块优化与验证
 
@@ -1079,7 +1078,6 @@ memory := wazero.NewMemory(store, memoryType)
 ```
 
 系统的内存管理策略包括：
-- 使用 TinyGo 的 `-gc=leaking` 简化垃圾收集机制提高性能
 - 合约代码应尽量重用缓冲区而非频繁分配内存
 - WebAssembly 模块限制最大内存使用（默认上限为 128 MB）
 - 内存管理包括 WebAssembly 线性内存和共享的主机缓冲区两部分

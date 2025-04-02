@@ -272,6 +272,7 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	input.Sender = ctx.Sender()
 	input.Function = functionName
 	input.Args = params
+	input.GasLimit = ctx.GetGas()
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("handle_contract_call 序列化失败: %w", err)
@@ -353,11 +354,23 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 		if err := json.Unmarshal(argData, &params); err != nil {
 			return -1
 		}
+		ctx.SetGasLimit(params.GasLimit)
 		result, err := ctx.Call(params.Caller, params.Contract, params.Function, params.Args...)
 		if err != nil {
 			return -1
 		}
-		if !m.Memory().Write(bufferPtr, result) {
+		currentGas := ctx.GetGas()
+		if currentGas > params.GasLimit {
+			return -1
+		}
+		var callResult types.CallResult
+		callResult.Data = result
+		callResult.GasUsed = params.GasLimit - currentGas
+		resultBytes, err := json.Marshal(callResult)
+		if err != nil {
+			return -1
+		}
+		if !m.Memory().Write(bufferPtr, resultBytes) {
 			return -1
 		}
 		return 0

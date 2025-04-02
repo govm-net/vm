@@ -203,6 +203,7 @@ func writeToMemory(data any) (ptr int32, size int32, err error) {
 
 // Sender 返回调用合约的账户地址
 func (c *Context) Sender() Address {
+	mock.ConsumeGas(10)
 	addr := mock.GetCaller()
 	if addr != ZeroAddress {
 		return addr
@@ -220,6 +221,7 @@ func (c *Context) Sender() Address {
 
 // BlockHeight 返回当前区块高度
 func (c *Context) BlockHeight() uint64 {
+	mock.ConsumeGas(10)
 	if c.blockHeight != 0 {
 		return c.blockHeight
 	}
@@ -231,6 +233,7 @@ func (c *Context) BlockHeight() uint64 {
 
 // BlockTime 返回当前区块时间戳
 func (c *Context) BlockTime() int64 {
+	mock.ConsumeGas(10)
 	if c.blockTime != 0 {
 		return c.blockTime
 	}
@@ -242,6 +245,7 @@ func (c *Context) BlockTime() int64 {
 
 // ContractAddress 返回当前合约地址
 func (c *Context) ContractAddress() Address {
+	mock.ConsumeGas(10)
 	addr := mock.GetCurrentContract()
 	if addr != ZeroAddress {
 		return addr
@@ -260,12 +264,14 @@ func (c *Context) ContractAddress() Address {
 
 // Balance 返回指定地址的余额
 func (c *Context) Balance(addr Address) uint64 {
+	mock.ConsumeGas(50)
 	// 直接调用宿主函数
 	return get_balance(int32(uintptr(unsafe.Pointer(&addr[0]))))
 }
 
 // Transfer 从合约转账到指定地址
 func (c *Context) Transfer(to Address, amount uint64) error {
+	mock.ConsumeGas(500)
 	data := types.TransferParams{
 		From:   c.ContractAddress(),
 		To:     to,
@@ -287,12 +293,14 @@ func (c *Context) Transfer(to Address, amount uint64) error {
 
 // Call 调用另一个合约的函数
 func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
+	mock.ConsumeGas(10000)
 	// 构造调用参数
 	callData := types.CallParams{
 		Contract: contract,
 		Function: function,
 		Args:     args,
 		Caller:   c.ContractAddress(), // 当前合约作为调用者
+		GasLimit: mock.GetGas() - 10000,
 	}
 
 	// 序列化调用参数
@@ -307,12 +315,21 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
 		return nil, fmt.Errorf("contract call failed with code: %d", errCode)
 	}
 
+	data := readMemory(resultPtr, resultSize)
+	var callResult types.CallResult
+	if err := json.Unmarshal(data, &callResult); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal call result: %w", err)
+	}
+	//扣除实际使用的gas
+	mock.ConsumeGas(callResult.GasUsed)
+
 	// 读取返回数据
-	return readMemory(resultPtr, resultSize), nil
+	return callResult.Data, nil
 }
 
 // CreateObject 创建一个新的状态对象
 func (c *Context) CreateObject() core.Object {
+	mock.ConsumeGas(500)
 	address := c.ContractAddress()
 	// 调用宿主函数，创建对象并获取对象ID
 	ptr, size, errCode := callHost(FuncCreateObject, address[:])
@@ -331,6 +348,7 @@ func (c *Context) CreateObject() core.Object {
 
 // GetObject 获取指定ID的状态对象
 func (c *Context) GetObject(id ObjectID) (core.Object, error) {
+	mock.ConsumeGas(50)
 	var request types.GetObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
@@ -357,6 +375,7 @@ func (c *Context) GetObject(id ObjectID) (core.Object, error) {
 
 // GetObjectWithOwner 获取指定所有者的状态对象
 func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
+	mock.ConsumeGas(50)
 	var request types.GetObjectWithOwnerParams
 	request.Contract = c.ContractAddress()
 	request.Owner = owner
@@ -387,6 +406,7 @@ func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
 
 // DeleteObject 删除指定ID的状态对象
 func (c *Context) DeleteObject(id ObjectID) {
+	mock.ConsumeGas(500)
 	var request types.DeleteObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
@@ -402,10 +422,12 @@ func (c *Context) DeleteObject(id ObjectID) {
 	if errCode != 0 {
 		panic(fmt.Sprintf("failed to delete object with code: %d", errCode))
 	}
+	mock.RefundGas(800)
 }
 
 // Log 记录事件
 func (c *Context) Log(event string, keyValues ...any) {
+	mock.ConsumeGas(100)
 	var request types.LogParams
 	request.Contract = c.ContractAddress()
 	request.Event = event
@@ -416,6 +438,7 @@ func (c *Context) Log(event string, keyValues ...any) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to serialize log request: %v", err))
 	}
+	mock.ConsumeGas(int64(len(bytes)))
 
 	// 调用宿主函数 - 忽略返回值，只关心发送日志操作
 	_, _, _ = callHost(FuncLog, bytes)
@@ -425,11 +448,13 @@ func (c *Context) Log(event string, keyValues ...any) {
 
 // ID 返回对象的唯一标识符
 func (o *Object) ID() ObjectID {
+	mock.ConsumeGas(10)
 	return o.id
 }
 
 // Owner 返回对象的所有者地址
 func (o *Object) Owner() Address {
+	mock.ConsumeGas(100)
 	// 将对象ID序列化
 	bytes, err := any2bytes(o.id)
 	if err != nil {
@@ -452,6 +477,7 @@ func (o *Object) Owner() Address {
 
 // SetOwner 设置对象的所有者
 func (o *Object) SetOwner(owner Address) {
+	mock.ConsumeGas(500)
 	// 构造参数
 	request := types.SetOwnerParams{
 		Contract: mock.GetCurrentContract(),
@@ -475,6 +501,7 @@ func (o *Object) SetOwner(owner Address) {
 
 // Get 获取对象字段的值
 func (o *Object) Get(field string, value any) error {
+	mock.ConsumeGas(100)
 	// 构造参数
 	getData := types.GetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
@@ -501,7 +528,7 @@ func (o *Object) Get(field string, value any) error {
 
 	// 读取字段数据
 	fieldData := readMemory(resultPtr, resultSize)
-	fmt.Println("[wasm]--fieldData", field, string(fieldData))
+	mock.ConsumeGas(int64(resultSize))
 	if err := json.Unmarshal(fieldData, value); err != nil {
 		return fmt.Errorf("failed to unmarshal to target type: %w", err)
 	}
@@ -511,6 +538,7 @@ func (o *Object) Get(field string, value any) error {
 
 // Set 设置对象字段的值
 func (o *Object) Set(field string, value any) error {
+	mock.ConsumeGas(1000)
 	// 构造参数
 	request := types.SetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
@@ -525,6 +553,7 @@ func (o *Object) Set(field string, value any) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize data: %w", err)
 	}
+	mock.ConsumeGas(int64(len(bytes)) * 100)
 
 	// 调用宿主函数
 	_, _, errCode := callHost(FuncSetObjectField, bytes)
@@ -536,6 +565,7 @@ func (o *Object) Set(field string, value any) error {
 }
 
 func (o *Object) Contract() Address {
+	mock.ConsumeGas(100)
 	// 调用宿主函数
 	resultPtr, resultSize, errCode := callHost(FuncGetObjectContract, o.id[:])
 	if errCode != 0 {
@@ -623,6 +653,9 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 		return ErrorCodeInvalidParams
 	}
 	functionName := input.Function
+	if input.GasLimit > 0 {
+		mock.ResetGas(input.GasLimit)
+	}
 
 	fmt.Println("handle_contract_call functionName", functionName, string(input.Args))
 

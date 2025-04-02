@@ -72,6 +72,12 @@ type CallParams struct {
 	Contract Address `json:"contract,omitempty"`
 	Function string  `json:"function,omitempty"`
 	Args     []any   `json:"args,omitempty"`
+	GasLimit int64   `json:"gas_limit,omitempty"`
+}
+
+type CallResult struct {
+	Data    []byte `json:"data,omitempty"`
+	GasUsed int64  `json:"gas_used,omitempty"`
 }
 
 type GetObjectParams struct {
@@ -126,6 +132,7 @@ type HandleContractCallParams struct {
 	Sender   Address `json:"sender,omitempty"`
 	Function string  `json:"function,omitempty"`
 	Args     []byte  `json:"args,omitempty"`
+	GasLimit int64   `json:"gas_limit,omitempty"`
 }
 
 // Context 是合约与区块链环境交互的主要接口
@@ -135,6 +142,8 @@ type BlockchainContext interface {
 	BlockTime() int64           // 获取当前区块时间戳
 	ContractAddress() Address   // 获取当前合约地址
 	TransactionHash() core.Hash // 获取当前交易哈希
+	SetGasLimit(limit int64)    // 设置gas限制
+	GetGas() int64              // 获取已使用gas
 	// 账户操作相关
 	Sender() Address                                // 获取交易发送者或调用合约
 	Balance(addr Address) uint64                    // 获取账户余额

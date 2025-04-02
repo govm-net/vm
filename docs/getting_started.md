@@ -702,7 +702,6 @@ args := []string{
     "-target=wasi",
     "-opt=z",        // 优化大小
     "-no-debug",     // 移除调试信息
-    "-gc=leaking",   // 简化垃圾收集
     "./main.go",
 }
 

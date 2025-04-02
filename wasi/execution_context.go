@@ -30,6 +30,7 @@ type defaultBlockchainContext struct {
 	sender       types.Address
 	txHash       core.Hash
 	nonce        uint64
+	gasLimit     int64
 }
 
 // NewDefaultBlockchainContext 创建一个新的简单区块链上下文
@@ -41,6 +42,7 @@ func NewDefaultBlockchainContext() *defaultBlockchainContext {
 		objects:        make(map[core.ObjectID]map[string]any),
 		objectOwner:    make(map[core.ObjectID]core.Address),
 		objectContract: make(map[core.ObjectID]core.Address),
+		gasLimit:       10000000,
 	}
 }
 
@@ -89,6 +91,14 @@ func (ctx *defaultBlockchainContext) Sender() types.Address {
 // Balance 获取账户余额
 func (ctx *defaultBlockchainContext) Balance(addr types.Address) uint64 {
 	return ctx.balances[addr]
+}
+
+func (ctx *defaultBlockchainContext) SetGasLimit(limit int64) {
+	ctx.gasLimit = limit
+}
+
+func (ctx *defaultBlockchainContext) GetGas() int64 {
+	return ctx.gasLimit
 }
 
 // Transfer 转账操作
