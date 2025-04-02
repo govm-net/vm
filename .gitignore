@@ -27,3 +27,4 @@ go.work.sum
 tmp
 *.wasm
 .vscode
+.DS_Store
