@@ -102,7 +102,7 @@ func TestFunc(x int) int {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := AddGasConsumption([]byte(tt.input))
+			got, err := AddGasConsumption("test", []byte(tt.input))
 			if err != nil {
 				t.Fatalf("AddGasConsumption() error = %v", err)
 				return

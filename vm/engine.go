@@ -10,7 +10,7 @@ import (
 	"github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/compiler"
 	"github.com/govm-net/vm/core"
-	"github.com/govm-net/vm/mock"
+	"github.com/govm-net/vm/repository"
 	"github.com/govm-net/vm/types"
 	"github.com/govm-net/vm/wasi"
 )
@@ -20,6 +20,7 @@ type Engine struct {
 	config        *Config
 	maker         *compiler.Maker
 	wazero_engine *wasi.WazeroVM
+	codeManager   *repository.Manager
 	ctx           types.BlockchainContext // 区块链上下文
 }
 
@@ -28,7 +29,7 @@ type Config struct {
 	// 合约相关配置
 	MaxContractSize  int64  // 最大合约大小
 	WASIContractsDir string // WASI合约存储目录
-
+	CodeManagerDir   string // 代码管理器存储目录
 	// TinyGo相关配置
 	TinyGoPath string // TinyGo编译器路径
 
@@ -83,10 +84,17 @@ func NewEngine(config *Config) (*Engine, error) {
 		return nil, fmt.Errorf("failed to create wazero engine: %w", err)
 	}
 
+	// 创建代码管理器
+	codeManager, err := repository.NewManager(config.CodeManagerDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create code manager: %w", err)
+	}
+
 	return &Engine{
 		config:        config,
 		maker:         maker,
 		wazero_engine: wazero_engine,
+		codeManager:   codeManager,
 		ctx:           wasi.NewDefaultBlockchainContext(),
 	}, nil
 }
@@ -135,11 +143,28 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 	if err := e.maker.ValidateContract(code); err != nil {
 		return core.ZeroAddress, fmt.Errorf("contract validation failed: %w", err)
 	}
+	contractAddr := api.GenerateContractAddress(code)
+
+	// 保存合约代码, 添加gas消耗
+	err := e.codeManager.RegisterCode(contractAddr, code)
+	if err != nil {
+		return core.ZeroAddress, fmt.Errorf("failed to save contract code: %w", err)
+	}
+
+	// 解析合约代码获取ABI信息
+	abi, err := abi.ExtractABI(code)
+	if err != nil {
+		return core.ZeroAddress, fmt.Errorf("failed to parse contract ABI: %w", err)
+	}
+	// 如果ABI中没有对外函数，不需要编译成wasm，可能只是公共模块
+	if len(abi.Functions) == 0 {
+		return contractAddr, nil
+	}
 
 	// 添加gas消耗
-	code, err := mock.AddGasConsumption(code)
+	code, err = e.codeManager.GetInjectedCode(contractAddr)
 	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("failed to add gas consumption: %w", err)
+		return core.ZeroAddress, fmt.Errorf("failed to get contract code: %w", err)
 	}
 
 	// 编译合约
@@ -149,15 +174,9 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 	}
 
 	// 部署合约
-	contractAddr, err := e.wazero_engine.DeployContract(e.ctx, wasmCode, core.ZeroAddress)
+	_, err = e.wazero_engine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
 	if err != nil {
 		return core.ZeroAddress, fmt.Errorf("contract deployment failed: %w", err)
-	}
-
-	// 解析合约代码获取ABI信息
-	abi, err := abi.ExtractABI(code)
-	if err != nil {
-		return contractAddr, fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
 
 	// 将ABI转换为JSON

@@ -176,7 +176,7 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 }
 
 // AddGasConsumption 添加gas消耗
-func AddGasConsumption(code []byte) ([]byte, error) {
+func AddGasConsumption(packageName string, code []byte) ([]byte, error) {
 	fset := token.NewFileSet()
 	parsedFile, err := parser.ParseFile(fset, "", code, parser.ParseComments)
 	if err != nil {

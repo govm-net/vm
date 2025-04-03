@@ -3,10 +3,12 @@
 package api
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"go/ast"
 
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/types"
 )
 
 // VM represents the virtual machine that executes smart contracts
@@ -80,4 +82,12 @@ var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
 		}
 	}
 	return nil
+}
+
+// GenerateContractAddress 生成合约地址
+func GenerateContractAddress(code []byte) types.Address {
+	var addr types.Address
+	hash := sha256.Sum256(code)
+	copy(addr[:], hash[:])
+	return addr
 }

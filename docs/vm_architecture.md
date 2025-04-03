@@ -365,8 +365,8 @@ Gas计费系统从两个维度实现资源控制：
 
 1. **代码行计费**：
    - 在合约编译阶段，通过`AddGasConsumption`函数自动在代码中插入Gas消耗点
+   - 每个代码块开始处注入Gas消耗代码
    - 每行代码执行消耗1点gas
-   - 包括变量声明、赋值、函数调用等所有语句
    - 支持条件语句、循环语句等复杂控制流结构
 
 2. **接口操作计费**：
@@ -375,16 +375,30 @@ Gas计费系统从两个维度实现资源控制：
    - 存储操作（如创建对象、修改字段）消耗较多gas
    - 合约调用等高级操作有额外的gas预留机制
 
-```go
-// Gas计费示例 - 代码行计费
-func MyContract(ctx core.Context) {
-    mock.ConsumeGas(1) // 自动插入的代码行计费
-    addr := ctx.Sender() // Sender()本身也会消耗gas
-    // ...更多代码
-}
-```
+#### 3.6.2 Gas消耗值
 
-#### 3.6.2 Gas控制机制
+| 接口 | 操作 | Gas消耗 |
+|-----|-----|---------|
+| **Context** | Sender() | 10 gas |
+| | BlockHeight() | 10 gas |
+| | BlockTime() | 10 gas |
+| | ContractAddress() | 10 gas |
+| | Balance(addr) | 50 gas |
+| | Transfer(to, amount) | 500 gas |
+| | Call(contract, function, args...) | 10000 gas + 被调用合约消耗 |
+| | CreateObject() | 50 gas |
+| | GetObject(id) | 50 gas |
+| | GetObjectWithOwner(owner) | 50 gas |
+| | DeleteObject(id) | 500 gas - 800 gas(退还) |
+| | Log(event, keyValues...) | 100 gas + 数据长度 |
+| **Object** | ID() | 10 gas |
+| | Contract() | 100 gas |
+| | Owner() | 100 gas |
+| | SetOwner(owner) | 500 gas |
+| | Get(field, value) | 100 gas + 结果数据大小 |
+| | Set(field, value) | 1000 gas + 数据大小 * 100 gas |
+
+#### 3.6.3 Gas控制机制
 
 VM系统的Gas控制具有以下特点：
 
@@ -393,6 +407,7 @@ VM系统的Gas控制具有以下特点：
 3. **预留机制**：合约调用时预留足够的Gas供被调用合约使用
 4. **动态计费**：部分操作（如存储）根据数据大小动态计算Gas消耗
 5. **资源限制**：当Gas耗尽时自动终止合约执行，防止资源滥用
+6. **Gas退还**：某些操作（如删除对象）会退还部分Gas
 
 ## 4. 状态管理系统
 
