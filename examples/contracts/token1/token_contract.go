@@ -2,8 +2,6 @@
 package token
 
 import (
-	"fmt"
-
 	"github.com/govm-net/vm/core"
 )
 
@@ -21,35 +19,20 @@ const (
 func InitializeToken(ctx core.Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
 	// 获取默认Object（空ObjectID）
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Request(err)
 
 	// 存储令牌基本信息
 	err = defaultObj.Set(TokenNameKey, name)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储令牌名称失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Request(err)
 
 	err = defaultObj.Set(TokenSymbolKey, symbol)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储令牌符号失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Request(err)
 
 	err = defaultObj.Set(TokenDecimalsKey, decimals)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储令牌小数位失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Request(err)
 
 	err = defaultObj.Set(TokenTotalSupplyKey, totalSupply)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储总供应量失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Request(err)
 
 	defaultObj.SetOwner(ctx.Sender())
 
@@ -74,39 +57,24 @@ func InitializeToken(ctx core.Context, name string, symbol string, decimals uint
 func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return "", "", 0, 0
-	}
+	core.Request(err)
 
 	// 读取令牌基本信息
 	var name string
 	err = defaultObj.Get(TokenNameKey, &name)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取令牌名称失败: %v", err))
-		return "", "", 0, 0
-	}
+	core.Request(err)
 
 	var symbol string
 	err = defaultObj.Get(TokenSymbolKey, &symbol)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取令牌符号失败: %v", err))
-		return "", "", 0, 0
-	}
+	core.Request(err)
 
 	var decimals uint8
 	err = defaultObj.Get(TokenDecimalsKey, &decimals)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取令牌小数位失败: %v", err))
-		return "", "", 0, 0
-	}
+	core.Request(err)
 
 	var totalSupply uint64
 	err = defaultObj.Get(TokenTotalSupplyKey, &totalSupply)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取总供应量失败: %v", err))
-		return "", "", 0, 0
-	}
+	core.Request(err)
 
 	return name, symbol, decimals, totalSupply
 }
@@ -115,10 +83,7 @@ func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
 func GetOwner(ctx core.Context) core.Address {
 	// 获取默认Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return core.ZeroAddress
-	}
+	core.Request(err)
 
 	return defaultObj.Owner()
 }
@@ -175,7 +140,8 @@ func Collect(ctx core.Context, ids []core.ObjectID) bool {
 	core.Request(len(ids) > 1)
 	var amount uint64
 	//将其他的object里的余额迁移到第一个object
-	for _, id := range ids[1:] {
+	for i := 1; i < len(ids); i++ {
+		id := ids[i]
 		obj, err := ctx.GetObject(id)
 		core.Request(err)
 		core.Request(obj.Owner() == sender)

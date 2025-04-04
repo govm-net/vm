@@ -27,20 +27,6 @@ func TestNewEngine(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
-		TinyGoPath:       "tinygo",
-		WASIOptions: WASIOptions{
-			MemoryLimit:      16 * 1024 * 1024, // 16MB
-			TableSize:        100,
-			Timeout:          1000,
-			FuelLimit:        1000000,
-			StackSize:        1024,
-			EnableSIMD:       true,
-			EnableThreads:    false,
-			EnableBulkMemory: true,
-			PrecompiledCache: true,
-			CacheDir:         filepath.Join(tmpDir, "cache"),
-			LogLevel:         "info",
-		},
 	}
 
 	// 创建引擎实例
@@ -70,20 +56,6 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
-		TinyGoPath:       "tinygo",
-		WASIOptions: WASIOptions{
-			MemoryLimit:      16 * 1024 * 1024,
-			TableSize:        100,
-			Timeout:          1000,
-			FuelLimit:        1000000,
-			StackSize:        1024,
-			EnableSIMD:       true,
-			EnableThreads:    false,
-			EnableBulkMemory: true,
-			PrecompiledCache: true,
-			CacheDir:         filepath.Join(tmpDir, "cache"),
-			LogLevel:         "info",
-		},
 	}
 
 	// 创建引擎实例
@@ -165,20 +137,6 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
-		TinyGoPath:       "tinygo",
-		WASIOptions: WASIOptions{
-			MemoryLimit:      16 * 1024 * 1024,
-			TableSize:        100,
-			Timeout:          1000,
-			FuelLimit:        1000000,
-			StackSize:        1024,
-			EnableSIMD:       true,
-			EnableThreads:    false,
-			EnableBulkMemory: true,
-			PrecompiledCache: true,
-			CacheDir:         filepath.Join(tmpDir, "cache"),
-			LogLevel:         "info",
-		},
 	}
 
 	// 创建引擎实例

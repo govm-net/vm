@@ -432,6 +432,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 			return -1
 		}
 		if obj.Owner() != params.Contract {
+			slog.Error("set_object_field 对象所有者不匹配", "contract", params.Contract, "owner", obj.Owner())
 			return -1
 		}
 		// 将value转换为[]byte
@@ -440,6 +441,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 			slog.Error("set_object_field 序列化失败", "error", err)
 			return -1
 		}
+		slog.Info("---set_object_field", "field", params.Field, "value", params.Value, "string", valueBytes, "len", len(valueBytes))
 		err = obj.Set(params.Contract, params.Sender, params.Field, valueBytes)
 		if err != nil {
 			slog.Error("set_object_field 设置字段失败", "error", err)
@@ -498,7 +500,7 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 			return -1
 		}
 		mem.Write(offset, data)
-		fmt.Printf("obj.getfield 获取字段成功:id:%x, %s\n", params.ID, string(data))
+		slog.Info("obj.getfield", "id", params.ID, "field", params.Field, "value", string(data))
 		return int32(len(data))
 
 	case types.FuncGetObject:

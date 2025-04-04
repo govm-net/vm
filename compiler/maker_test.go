@@ -16,8 +16,8 @@ func TestValidateContract(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: []string{
-			"github.com/govm-net/vm/core",
+		AllowedImports: map[string]string{
+			"github.com/govm-net/vm/core": "v1.0.0",
 		},
 	}
 	maker := NewMaker(config)
@@ -73,8 +73,8 @@ func TestCompileContract(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: []string{
-			"github.com/govm-net/vm/core",
+		AllowedImports: map[string]string{
+			"github.com/govm-net/vm/core": "v1.0.0",
 		},
 	}
 	maker := NewMaker(config)
@@ -108,8 +108,8 @@ func TestValidateNoMaliciousCommands(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: []string{
-			"github.com/govm-net/vm/core",
+		AllowedImports: map[string]string{
+			"github.com/govm-net/vm/core": "v1.0.0",
 		},
 	}
 	maker := NewMaker(config)

@@ -7,31 +7,8 @@ import (
 	"fmt"
 	"go/ast"
 
-	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/types"
 )
-
-// VM represents the virtual machine that executes smart contracts
-type VM interface {
-	// Deploy deploys a new smart contract to the blockchain
-	Deploy(code []byte, args ...[]byte) (core.Address, error)
-
-	// Execute executes a function on a deployed contract
-	Execute(contract core.Address, function string, args ...[]byte) ([]byte, error)
-
-	// ValidateContract checks if the contract code adheres to the restrictions
-	ValidateContract(code []byte) error
-}
-
-// Restricted keywords that are not allowed in smart contracts
-var RestrictedKeywords = []string{
-	"go",      // Prevents concurrent execution
-	"select",  // Eliminates channel selection
-	"range",   // Restricts iteration over maps
-	"cap",     // Prevents capacity checks
-	"recover", // Disallows panic recovery
-	"package", // Controls package declarations
-}
 
 // ContractConfig defines configuration for contract validation and execution
 type ContractConfig struct {
@@ -45,19 +22,26 @@ type ContractConfig struct {
 	MaxCodeSize uint64
 
 	// AllowedImports contains the packages that can be imported by contracts
-	AllowedImports []string
+	AllowedImports map[string]string
+
+	// Replaces contains the packages that can be replaced by contracts
+	Replaces map[string]string
 }
 
-// DefaultContractConfig returns a default configuration for contracts
-func DefaultContractConfig() ContractConfig {
+type IContractConfigGenerator func() ContractConfig
+
+var DefaultContractConfig IContractConfigGenerator = func() ContractConfig {
 	return ContractConfig{
 		MaxGas:       1000000,
 		MaxCallDepth: 8,
 		MaxCodeSize:  1024 * 1024, // 1MB
-		AllowedImports: []string{
-			"github.com/govm-net/vm/core",
+		AllowedImports: map[string]string{
+			"github.com/govm-net/vm": "v1.0.0",
 			// Additional allowed imports would be listed here
 		},
+		// Replaces: map[string]string{
+		// 	"github.com/govm-net/vm": "./",
+		// },
 	}
 }
 
@@ -84,10 +68,28 @@ var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
 	return nil
 }
 
-// GenerateContractAddress 生成合约地址
-func GenerateContractAddress(code []byte) types.Address {
+type IContractAddressGenerator func(code []byte) types.Address
+
+var DefaultContractAddressGenerator IContractAddressGenerator = func(code []byte) types.Address {
 	var addr types.Address
 	hash := sha256.Sum256(code)
 	copy(addr[:], hash[:])
 	return addr
 }
+
+type IGoModGenerator func(moduleName string, imports map[string]string, replaces map[string]string) string
+
+var DefaultGoModGenerator IGoModGenerator = func(moduleName string, imports, replaces map[string]string) string {
+	content := fmt.Sprintf("module %s\n\n", moduleName)
+	content += "go 1.23\n\n"
+	for imp, ver := range imports {
+		content += fmt.Sprintf("require %s %s\n", imp, ver)
+	}
+	for old, new := range replaces {
+		content += fmt.Sprintf("replace %s => %s\n", old, new)
+	}
+	return content
+}
+
+var Builder = "tinygo"
+var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "-opt", "z", "-no-debug", "./"}

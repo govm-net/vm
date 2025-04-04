@@ -27,29 +27,9 @@ type Engine struct {
 // Config 引擎配置
 type Config struct {
 	// 合约相关配置
-	MaxContractSize  int64  // 最大合约大小
+	MaxContractSize  uint64 // 最大合约大小
 	WASIContractsDir string // WASI合约存储目录
 	CodeManagerDir   string // 代码管理器存储目录
-	// TinyGo相关配置
-	TinyGoPath string // TinyGo编译器路径
-
-	// WASI运行时配置
-	WASIOptions WASIOptions
-}
-
-// WASIOptions WASI运行时选项
-type WASIOptions struct {
-	MemoryLimit      int64  // 内存限制
-	TableSize        int    // 函数表大小
-	Timeout          int64  // 执行超时(毫秒)
-	FuelLimit        int64  // 指令限制
-	StackSize        int    // 栈大小
-	EnableSIMD       bool   // 是否启用SIMD
-	EnableThreads    bool   // 是否启用线程
-	EnableBulkMemory bool   // 是否启用批量内存操作
-	PrecompiledCache bool   // 是否启用预编译缓存
-	CacheDir         string // 缓存目录
-	LogLevel         string // 日志级别
 }
 
 // NewEngine 创建新的合约引擎
@@ -64,18 +44,9 @@ func NewEngine(config *Config) (*Engine, error) {
 		return nil, fmt.Errorf("failed to create contracts directory: %w", err)
 	}
 
-	// 创建缓存目录
-	if config.WASIOptions.PrecompiledCache {
-		if err := os.MkdirAll(config.WASIOptions.CacheDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create cache directory: %w", err)
-		}
-	}
-
 	// 创建Maker实例
-	contractConfig := api.ContractConfig{
-		MaxCodeSize:    uint64(config.MaxContractSize),
-		AllowedImports: []string{"github.com/govm-net/vm/core"},
-	}
+	contractConfig := api.DefaultContractConfig()
+	contractConfig.MaxCodeSize = uint64(config.MaxContractSize)
 	maker := compiler.NewMaker(contractConfig)
 
 	// 创建WazeroEngine实例
@@ -118,20 +89,60 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("WASI contracts directory is empty")
 	}
 
-	if config.TinyGoPath == "" {
-		return fmt.Errorf("TinyGo path is empty")
+	return nil
+}
+
+// DeployContract 部署合约
+func (e *Engine) DeployContractWithAddress(code []byte, contractAddr core.Address) error {
+	// 验证合约代码
+	if err := e.maker.ValidateContract(code); err != nil {
+		return fmt.Errorf("contract validation failed: %w", err)
 	}
 
-	if config.WASIOptions.MemoryLimit <= 0 {
-		return fmt.Errorf("invalid memory limit: %d", config.WASIOptions.MemoryLimit)
+	// 保存合约代码, 添加gas消耗
+	err := e.codeManager.RegisterCode(contractAddr, code)
+	if err != nil {
+		return fmt.Errorf("failed to save contract code: %w", err)
 	}
 
-	if config.WASIOptions.Timeout <= 0 {
-		return fmt.Errorf("invalid timeout: %d", config.WASIOptions.Timeout)
+	// 解析合约代码获取ABI信息
+	abi, err := abi.ExtractABI(code)
+	if err != nil {
+		return fmt.Errorf("failed to parse contract ABI: %w", err)
+	}
+	// 如果ABI中没有对外函数，不需要编译成wasm，可能只是公共模块
+	if len(abi.Functions) == 0 {
+		return nil
 	}
 
-	if config.WASIOptions.FuelLimit <= 0 {
-		return fmt.Errorf("invalid fuel limit: %d", config.WASIOptions.FuelLimit)
+	// 添加gas消耗
+	code, err = e.codeManager.GetInjectedCode(contractAddr)
+	if err != nil {
+		return fmt.Errorf("failed to get contract code: %w", err)
+	}
+
+	// 编译合约
+	wasmCode, err := e.maker.CompileContract(code)
+	if err != nil {
+		return fmt.Errorf("contract compilation failed: %w", err)
+	}
+
+	// 部署合约
+	_, err = e.wazero_engine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
+	if err != nil {
+		return fmt.Errorf("contract deployment failed: %w", err)
+	}
+
+	// 将ABI转换为JSON
+	abiJSON, err := json.MarshalIndent(abi, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal ABI: %w", err)
+	}
+
+	// 保存合约ABI文件
+	abiPath := filepath.Join(e.config.WASIContractsDir, fmt.Sprintf("%x.abi", contractAddr))
+	if err := os.WriteFile(abiPath, abiJSON, 0644); err != nil {
+		return fmt.Errorf("failed to save contract ABI: %w", err)
 	}
 
 	return nil
@@ -139,59 +150,8 @@ func validateConfig(config *Config) error {
 
 // DeployContract 部署合约
 func (e *Engine) DeployContract(code []byte) (core.Address, error) {
-	// 验证合约代码
-	if err := e.maker.ValidateContract(code); err != nil {
-		return core.ZeroAddress, fmt.Errorf("contract validation failed: %w", err)
-	}
-	contractAddr := api.GenerateContractAddress(code)
-
-	// 保存合约代码, 添加gas消耗
-	err := e.codeManager.RegisterCode(contractAddr, code)
-	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("failed to save contract code: %w", err)
-	}
-
-	// 解析合约代码获取ABI信息
-	abi, err := abi.ExtractABI(code)
-	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("failed to parse contract ABI: %w", err)
-	}
-	// 如果ABI中没有对外函数，不需要编译成wasm，可能只是公共模块
-	if len(abi.Functions) == 0 {
-		return contractAddr, nil
-	}
-
-	// 添加gas消耗
-	code, err = e.codeManager.GetInjectedCode(contractAddr)
-	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("failed to get contract code: %w", err)
-	}
-
-	// 编译合约
-	wasmCode, err := e.maker.CompileContract(code)
-	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("contract compilation failed: %w", err)
-	}
-
-	// 部署合约
-	_, err = e.wazero_engine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
-	if err != nil {
-		return core.ZeroAddress, fmt.Errorf("contract deployment failed: %w", err)
-	}
-
-	// 将ABI转换为JSON
-	abiJSON, err := json.MarshalIndent(abi, "", "  ")
-	if err != nil {
-		return contractAddr, fmt.Errorf("failed to marshal ABI: %w", err)
-	}
-
-	// 保存合约ABI文件
-	abiPath := filepath.Join(e.config.WASIContractsDir, fmt.Sprintf("%x.abi", contractAddr))
-	if err := os.WriteFile(abiPath, abiJSON, 0644); err != nil {
-		return contractAddr, fmt.Errorf("failed to save contract ABI: %w", err)
-	}
-
-	return contractAddr, nil
+	contractAddr := api.DefaultContractAddressGenerator(code)
+	return contractAddr, e.DeployContractWithAddress(code, contractAddr)
 }
 
 func (e *Engine) DeleteContract(contractAddr core.Address) {

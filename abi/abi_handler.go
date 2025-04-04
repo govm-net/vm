@@ -63,12 +63,12 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	sb.WriteString(fmt.Sprintf("package %s\n\n", g.abi.PackageName))
 	sb.WriteString("import (\n")
 
-	// 添加基础导入
-	sb.WriteString("\t\"encoding/json\"\n")
-	sb.WriteString("\t\"fmt\"\n")
-
 	// 收集所有需要的导入
 	imports := make(map[string]string) // path -> alias
+	// 添加基础导入
+	imports["github.com/govm-net/vm/core"] = ""
+	imports["fmt"] = ""
+	imports["encoding/json"] = ""
 	for _, fn := range g.abi.Functions {
 		if !fn.IsExported {
 			continue

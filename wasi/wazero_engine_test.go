@@ -19,7 +19,7 @@ func TestNewWazeroVM(t *testing.T) {
 		t.Fatalf("NewWazeroVM() = nil, want non-nil")
 	}
 
-	code, err := os.ReadFile("../wasm/contract.wasm")
+	code, err := os.ReadFile("../compiler/wasm/contract.wasm")
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}

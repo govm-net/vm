@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,6 +40,7 @@ type ContractMetadata struct {
 func NewManager(rootDir string) (*Manager, error) {
 	// 确保根目录存在
 	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		slog.Error("failed to create root directory", "dir", rootDir, "error", err)
 		return nil, fmt.Errorf("failed to create root directory: %w", err)
 	}
 

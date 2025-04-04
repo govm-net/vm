@@ -2,6 +2,7 @@
 package compiler
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -21,9 +22,8 @@ type Maker struct {
 	config api.ContractConfig
 }
 
-var VM_IMPORT_PATH = "./"
-
-var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "-opt", "z", "-no-debug", "./"}
+//go:embed wasm/contract.go
+var WASM_CONTRACT_TEMPLATE string
 
 // var BuildParams = []string{"build", "-o", "contract.wasm", "-target", "wasi", "./"}
 
@@ -74,8 +74,6 @@ var RestrictedCommentPrefixes []string = []string{
 }
 
 func init() {
-	VM_IMPORT_PATH, _ = os.Getwd()
-	VM_IMPORT_PATH += "/../"
 
 	// 预处理限制的注释前缀
 	rawPrefixes := RestrictedCommentPrefixes
@@ -158,14 +156,8 @@ func (m *Maker) ValidateContract(code []byte) error {
 	}
 
 	// 创建 go.mod 文件
-	goModContent := fmt.Sprintf(`module %s
+	goModContent := api.DefaultGoModGenerator(file.Name.Name, m.config.AllowedImports, m.config.Replaces)
 
-go 1.23
-
-require github.com/govm-net/vm v0.0.0
-
-replace github.com/govm-net/vm => %s
-`, file.Name.Name, VM_IMPORT_PATH)
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return fmt.Errorf("failed to write go.mod: %w", err)
 	}
@@ -196,7 +188,7 @@ func (m *Maker) validateImports(file *ast.File) error {
 		importPath := strings.Trim(imp.Path.Value, "\"")
 		allowed := false
 
-		for _, allowedImport := range m.config.AllowedImports {
+		for allowedImport := range m.config.AllowedImports {
 			if importPath == allowedImport || strings.HasPrefix(importPath, allowedImport+"/") {
 				allowed = true
 				break
@@ -322,13 +314,6 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write handler code: %w", err)
 	}
 
-	// 5. 复制wasm/contract.go到临时文件夹
-	wasmContractFile := filepath.Join(VM_IMPORT_PATH, "wasm/contract.go")
-	contractGoContent, err := os.ReadFile(wasmContractFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read contract.go: %w", err)
-	}
-
 	// 修改contract.go，添加handler函数的注册
 	registerCode := "\nfunc init() {\n"
 	for _, fn := range abiInfo.Functions {
@@ -338,20 +323,13 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 	registerCode += "}\n"
 
-	modifiedContractGo := string(contractGoContent) + registerCode
+	modifiedContractGo := WASM_CONTRACT_TEMPLATE + registerCode
 	if err := os.WriteFile(filepath.Join(tmpDir, "contract.go"), []byte(modifiedContractGo), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write modified contract.go: %w", err)
 	}
 
 	// 创建 go.mod 文件
-	goModContent := fmt.Sprintf(`module %s
-
-go 1.23
-
-require github.com/govm-net/vm v0.0.0
-
-replace github.com/govm-net/vm => %s
-`, "main", VM_IMPORT_PATH)
+	goModContent := api.DefaultGoModGenerator("main", m.config.AllowedImports, m.config.Replaces)
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write go.mod: %w", err)
 	}
@@ -365,7 +343,7 @@ replace github.com/govm-net/vm => %s
 	}
 
 	// 6. 使用tinygo编译
-	cmd = exec.Command("tinygo", BuildParams...)
+	cmd = exec.Command(api.Builder, api.BuildParams...)
 	cmd.Dir = tmpDir
 	output, err = cmd.CombinedOutput()
 	if err != nil {

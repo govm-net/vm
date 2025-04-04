@@ -474,7 +474,6 @@ func main() {
 	config := api.DefaultContractConfig()
 	config.EnableWASIContracts = true
 	config.WASIContractsDir = filepath.Join(".", "wasi_modules")
-	config.TinyGoPath = "/usr/local/bin/tinygo" // TinyGo 可执行文件路径
 
 	// 确保存储目录存在
 	os.MkdirAll(config.WASIContractsDir, 0755)

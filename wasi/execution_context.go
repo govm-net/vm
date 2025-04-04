@@ -2,7 +2,6 @@ package wasi
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +20,7 @@ type defaultBlockchainContext struct {
 	balances map[types.Address]uint64
 
 	// 虚拟机对象存储
-	objects        map[core.ObjectID]map[string]any
+	objects        map[core.ObjectID]map[string][]byte
 	objectOwner    map[core.ObjectID]core.Address
 	objectContract map[core.ObjectID]core.Address
 
@@ -39,7 +38,7 @@ func NewDefaultBlockchainContext() *defaultBlockchainContext {
 		blockHeight:    1,
 		blockTime:      2,
 		balances:       make(map[core.Address]uint64),
-		objects:        make(map[core.ObjectID]map[string]any),
+		objects:        make(map[core.ObjectID]map[string][]byte),
 		objectOwner:    make(map[core.ObjectID]core.Address),
 		objectContract: make(map[core.ObjectID]core.Address),
 		gasLimit:       10000000,
@@ -121,7 +120,7 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 	id := ctx.generateObjectID(contract, ctx.sender)
 
 	// 创建对象存储
-	ctx.objects[id] = make(map[string]any)
+	ctx.objects[id] = make(map[string][]byte)
 	ctx.objectOwner[id] = ctx.Sender()
 	ctx.objectContract[id] = contract
 
@@ -137,7 +136,7 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 // CreateObject 创建新对象
 func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, id types.ObjectID) (types.VMObject, error) {
 	// 创建对象存储
-	ctx.objects[id] = make(map[string]any)
+	ctx.objects[id] = make(map[string][]byte)
 	ctx.objectOwner[id] = contract
 	ctx.objectContract[id] = contract
 
@@ -216,16 +215,16 @@ func (ctx *defaultBlockchainContext) setObjectOwner(id core.ObjectID, owner type
 	ctx.objectOwner[id] = owner
 }
 
-func (ctx *defaultBlockchainContext) setObjectField(id core.ObjectID, field string, value any) {
+func (ctx *defaultBlockchainContext) setObjectField(id core.ObjectID, field string, value []byte) {
 	obj, exists := ctx.objects[id]
 	if !exists {
-		obj = make(map[string]any)
+		obj = make(map[string][]byte)
 	}
 	obj[field] = value
 	ctx.objects[id] = obj
 }
 
-func (ctx *defaultBlockchainContext) getObjectField(id core.ObjectID, field string) any {
+func (ctx *defaultBlockchainContext) getObjectField(id core.ObjectID, field string) []byte {
 	obj, exists := ctx.objects[id]
 	if !exists {
 		return nil
@@ -270,12 +269,7 @@ func (o *vmObject) Get(contract types.Address, field string) ([]byte, error) {
 		return nil, errors.New("字段不存在")
 	}
 
-	data, err := json.Marshal(fieldValue)
-	if err != nil {
-		return nil, fmt.Errorf("序列化失败: %w", err)
-	}
-
-	return data, nil
+	return fieldValue, nil
 }
 
 // Set 设置字段值
