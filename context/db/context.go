@@ -102,7 +102,6 @@ type Context struct {
 	// Runtime state
 	sender       core.Address
 	gasLimit     int64
-	gasUsed      int64
 	currentTx    *DBTransaction
 	currentBlock *DBBlock
 	nonce        uint64
@@ -134,6 +133,7 @@ func NewContext(params map[string]any) types.BlockchainContext {
 
 	ctx := &Context{db: db}
 	ctx.initDB()
+	ctx.SetGasLimit(1000000)
 	return ctx
 }
 
@@ -150,6 +150,34 @@ func (c *Context) initDB() {
 	if err != nil {
 		panic(fmt.Errorf("failed to migrate database: %v", err))
 	}
+}
+
+func (c *Context) SetBlockInfo(height uint64, time int64, hash core.Hash) error {
+	block := &DBBlock{
+		Height: height,
+		Time:   time,
+		Hash:   hash.String(),
+	}
+	if err := c.db.Create(block).Error; err != nil {
+		return fmt.Errorf("failed to create block: %v", err)
+	}
+	c.currentBlock = block
+	return nil
+}
+
+func (c *Context) SetTransactionInfo(hash core.Hash, from types.Address, to types.Address, value uint64) error {
+	tx := &DBTransaction{
+		Hash:        hash.String(),
+		FromAddress: from.String(),
+		ToAddress:   to.String(),
+		Value:       value,
+	}
+	if err := c.db.Create(tx).Error; err != nil {
+		return fmt.Errorf("failed to create transaction: %v", err)
+	}
+	c.currentTx = tx
+	c.sender = from
+	return nil
 }
 
 func (c *Context) SetGasLimit(limit int64) {
@@ -225,7 +253,7 @@ func (c *Context) Sender() core.Address {
 
 // GetGas implements types.BlockchainContext
 func (c *Context) GetGas() int64 {
-	return c.gasUsed
+	return c.gasLimit
 }
 
 // Balance implements types.BlockchainContext
@@ -304,12 +332,12 @@ func (c *Context) CreateObjectWithID(contract core.Address, id core.ObjectID) (t
 	obj := &Object{
 		ctx:      c,
 		id:       id,
-		owner:    c.sender,
+		owner:    contract,
 		contract: contract,
 	}
 
 	dbObj := &DBObject{
-		Owner:    obj.owner.String(),
+		Owner:    contract.String(),
 		Contract: contract.String(),
 		ObjectID: id.String(),
 	}
@@ -317,7 +345,7 @@ func (c *Context) CreateObjectWithID(contract core.Address, id core.ObjectID) (t
 	if err := c.db.Create(dbObj).Error; err != nil {
 		return nil, fmt.Errorf("failed to create object: %v", err)
 	}
-
+	fmt.Println("create object", dbObj)
 	return obj, nil
 }
 

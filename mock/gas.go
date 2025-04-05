@@ -7,7 +7,7 @@ import (
 
 var (
 	mu   sync.RWMutex
-	gas  int64
+	gas  int64 = 10000
 	used int64
 )
 

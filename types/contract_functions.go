@@ -137,6 +137,9 @@ type HandleContractCallParams struct {
 
 // Context 是合约与区块链环境交互的主要接口
 type BlockchainContext interface {
+	// set block info and transaction info
+	SetBlockInfo(height uint64, time int64, hash core.Hash) error
+	SetTransactionInfo(hash core.Hash, from Address, to Address, value uint64) error
 	// 区块链信息相关
 	BlockHeight() uint64        // 获取当前区块高度
 	BlockTime() int64           // 获取当前区块时间戳

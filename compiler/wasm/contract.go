@@ -653,6 +653,7 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 		return ErrorCodeInvalidParams
 	}
 	functionName := input.Function
+	fmt.Println("handle_contract_call gasLimit", input.GasLimit)
 	if input.GasLimit > 0 {
 		mock.ResetGas(input.GasLimit)
 	}

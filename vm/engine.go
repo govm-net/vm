@@ -82,6 +82,10 @@ func (e *Engine) WithContext(ctx types.BlockchainContext) *Engine {
 	return e
 }
 
+func (e *Engine) GetContext() types.BlockchainContext {
+	return e.ctx
+}
+
 // validateConfig 验证配置
 func validateConfig(config *Config) error {
 	if config == nil {

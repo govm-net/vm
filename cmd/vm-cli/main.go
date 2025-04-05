@@ -21,6 +21,7 @@ func main() {
 	funcName := executeCommand.String("f", "", "Function name to execute")
 	argsJSON := executeCommand.String("a", "", "Function arguments in JSON format")
 	sender := executeCommand.String("s", "", "Transaction sender address")
+	wasmDir2 := executeCommand.String("w", "wasm", "WASM directory")
 
 	// 检查参数
 	if len(os.Args) < 2 {
@@ -37,7 +38,7 @@ func main() {
 		}
 	case "execute":
 		executeCommand.Parse(os.Args[2:])
-		if err := runExecute(*contractAddr, *funcName, *argsJSON, *sender, *repoDir); err != nil {
+		if err := runExecute(*contractAddr, *funcName, *argsJSON, *sender, *wasmDir2); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}

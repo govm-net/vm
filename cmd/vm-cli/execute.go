@@ -8,7 +8,7 @@ import (
 	"github.com/govm-net/vm/vm"
 )
 
-func runExecute(contractAddr, funcName, argsJSON, sender, repoDir string) error {
+func runExecute(contractAddr, funcName, argsJSON, sender, wasmDir string) error {
 	// 检查必需参数
 	if contractAddr == "" {
 		return fmt.Errorf("contract address is required")
@@ -19,18 +19,19 @@ func runExecute(contractAddr, funcName, argsJSON, sender, repoDir string) error 
 	if sender == "" {
 		return fmt.Errorf("sender address is required")
 	}
-	if repoDir == "" {
-		return fmt.Errorf("repo directory is required")
+	if wasmDir == "" {
+		return fmt.Errorf("wasm directory is required")
 	}
 
 	// 解析合约地址
 	address := core.AddressFromString(contractAddr)
+	fmt.Println("address", address)
 
 	// 创建VM引擎配置
 	config := &vm.Config{
 		MaxContractSize:  1024 * 1024, // 1MB
-		CodeManagerDir:   repoDir,
-		WASIContractsDir: repoDir,
+		WASIContractsDir: wasmDir,
+		CodeManagerDir:   ".code",
 		ContextType:      "db",
 	}
 
@@ -40,6 +41,10 @@ func runExecute(contractAddr, funcName, argsJSON, sender, repoDir string) error 
 		return fmt.Errorf("failed to create VM engine: %w", err)
 	}
 	defer engine.Close()
+
+	ctx := engine.GetContext()
+	ctx.SetBlockInfo(1, 1, core.HashFromString("0x1234567890"))
+	ctx.SetTransactionInfo(core.HashFromString("0x1234567890ab"), core.AddressFromString(sender), core.AddressFromString(contractAddr), 1000)
 
 	// 解析参数
 	var params []byte

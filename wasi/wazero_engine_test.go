@@ -12,7 +12,12 @@ import (
 )
 
 func TestNewWazeroVM(t *testing.T) {
-	svm, err := NewWazeroVM("")
+	tmpDir, err := os.MkdirTemp("", "wazero_engine_test")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	svm, err := NewWazeroVM(tmpDir)
 	if err != nil {
 		t.Fatalf("NewWazeroVM() error = %v", err)
 	}

@@ -80,7 +80,7 @@ var DefaultGoModGenerator IGoModGenerator = func(moduleName string, imports, rep
 go 1.23.0
 
 require (
-	github.com/govm-net/vm v0.1.0
+	github.com/govm-net/vm v0.1.1
 )
 
 // replace github.com/govm-net/vm => ./

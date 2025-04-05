@@ -21,7 +21,7 @@ import (
 // WazeroVM 使用wazero实现的虚拟机
 type WazeroVM struct {
 	// 存储已部署合约的映射表
-	contracts     map[types.Address][]byte
+	// contracts     map[types.Address][]byte
 	contractsLock sync.RWMutex
 
 	// 合约存储目录
@@ -47,7 +47,7 @@ func NewWazeroVM(contractDir string) (*WazeroVM, error) {
 	ctx := context.Background()
 
 	vm := &WazeroVM{
-		contracts:   make(map[types.Address][]byte),
+		// contracts:   make(map[types.Address][]byte),
 		contractDir: contractDir,
 		ctx:         ctx,
 	}
@@ -70,9 +70,9 @@ func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmC
 	}
 
 	// 存储合约代码
-	vm.contractsLock.Lock()
-	vm.contracts[contractAddr] = wasmCode
-	vm.contractsLock.Unlock()
+	// vm.contractsLock.Lock()
+	// vm.contracts[contractAddr] = wasmCode
+	// vm.contractsLock.Unlock()
 	var id core.ObjectID
 	copy(id[:], contractAddr[:])
 	ctx.CreateObjectWithID(contractAddr, id)
@@ -93,7 +93,8 @@ func (vm *WazeroVM) DeleteContract(ctx types.BlockchainContext, contractAddr typ
 	vm.contractsLock.Lock()
 	defer vm.contractsLock.Unlock()
 	// 从合约映射中删除
-	delete(vm.contracts, contractAddr)
+	// delete(vm.contracts, contractAddr)
+	os.RemoveAll(filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)))
 }
 
 func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (api.Module, error) {
@@ -216,12 +217,16 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (
 // ExecuteContract 执行已部署的合约函数
 func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr types.Address, functionName string, params []byte) (interface{}, error) {
 	// 检查合约是否存在
-	vm.contractsLock.RLock()
-	wasmCode, exists := vm.contracts[contractAddr]
-	vm.contractsLock.RUnlock()
+	// vm.contractsLock.RLock()
+	// wasmCode, exists := vm.contracts[contractAddr]
+	// vm.contractsLock.RUnlock()
 
-	if !exists {
-		return nil, fmt.Errorf("合约不存在: %x", contractAddr)
+	// if !exists {
+	// 	return nil, fmt.Errorf("合约不存在: %x", contractAddr)
+	// }
+	wasmCode, err := os.ReadFile(filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)+".wasm"))
+	if err != nil {
+		return nil, fmt.Errorf("读取合约代码失败: %w", err)
 	}
 
 	module, err := vm.initContract(ctx, wasmCode)
@@ -273,6 +278,7 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	input.Function = functionName
 	input.Args = params
 	input.GasLimit = ctx.GetGas()
+	fmt.Println("[host]handle_contract_call gasLimit", input.GasLimit)
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("handle_contract_call 序列化失败: %w", err)

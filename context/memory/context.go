@@ -50,10 +50,19 @@ func NewBlockchainContext(params map[string]any) types.BlockchainContext {
 	}
 }
 
-// SetExecutionContext 设置当前执行上下文
-func (ctx *defaultBlockchainContext) SetExecutionContext(contractAddr, sender types.Address) {
-	ctx.contractAddr = contractAddr
-	ctx.sender = sender
+func (ctx *defaultBlockchainContext) SetBlockInfo(height uint64, time int64, hash core.Hash) error {
+	ctx.blockHeight = height
+	ctx.blockTime = time
+	ctx.txHash = hash
+	return nil
+}
+
+func (ctx *defaultBlockchainContext) SetTransactionInfo(hash core.Hash, from types.Address, to types.Address, value uint64) error {
+	ctx.txHash = hash
+	ctx.sender = from
+	ctx.contractAddr = to
+	// ctx.value = value
+	return nil
 }
 
 func (ctx *defaultBlockchainContext) WithTransaction(txHash core.Hash) types.BlockchainContext {

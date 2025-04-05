@@ -37,7 +37,7 @@ func TestTransactionContext(t *testing.T) {
 	txHash := core.HashFromString("0xtx")
 
 	// Test setting transaction context
-	ctx.SetExecutionContext(contract, sender)
+	ctx.SetTransactionInfo(txHash, sender, contract, 1000)
 	ctx.WithTransaction(txHash)
 
 	// Verify transaction context
@@ -81,7 +81,7 @@ func TestObjectOperations(t *testing.T) {
 	txHash := core.HashFromString("0xtx")
 
 	// Set transaction context
-	ctx.SetExecutionContext(contract, sender)
+	ctx.SetTransactionInfo(txHash, sender, contract, 1000)
 	ctx.WithTransaction(txHash)
 
 	// Test object creation
