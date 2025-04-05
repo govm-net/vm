@@ -9,6 +9,7 @@ import (
 	"github.com/govm-net/vm/abi"
 	"github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/compiler"
+	"github.com/govm-net/vm/context"
 	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/repository"
 	"github.com/govm-net/vm/types"
@@ -27,9 +28,11 @@ type Engine struct {
 // Config 引擎配置
 type Config struct {
 	// 合约相关配置
-	MaxContractSize  uint64 // 最大合约大小
-	WASIContractsDir string // WASI合约存储目录
-	CodeManagerDir   string // 代码管理器存储目录
+	MaxContractSize  uint64         // 最大合约大小
+	WASIContractsDir string         // WASI合约存储目录
+	CodeManagerDir   string         // 代码管理器存储目录
+	ContextType      string         // 区块链上下文类型
+	ContextParams    map[string]any // 区块链上下文参数
 }
 
 // NewEngine 创建新的合约引擎
@@ -60,13 +63,17 @@ func NewEngine(config *Config) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create code manager: %w", err)
 	}
+	ctx, err := context.Get(context.ContextType(config.ContextType), config.ContextParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default context: %w", err)
+	}
 
 	return &Engine{
 		config:        config,
 		maker:         maker,
 		wazero_engine: wazero_engine,
 		codeManager:   codeManager,
-		ctx:           wasi.NewDefaultBlockchainContext(),
+		ctx:           ctx,
 	}, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/govm-net/vm/context/memory"
 	"github.com/govm-net/vm/core"
 )
 
@@ -26,7 +27,7 @@ func TestNewWazeroVM(t *testing.T) {
 
 	var resultValue uint64
 
-	ctx := NewDefaultBlockchainContext()
+	ctx := memory.NewBlockchainContext(nil)
 	sender := core.Address{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
 
 	// 测试部署合约
@@ -35,7 +36,7 @@ func TestNewWazeroVM(t *testing.T) {
 		t.Fatalf("DeployContract() error = %v", err)
 	}
 	defer svm.DeleteContract(ctx, contractAddr)
-	ctx.SetExecutionContext(contractAddr, sender)
+	// ctx.SetExecutionContext(contractAddr, sender)
 
 	// 测试执行合约
 	result, err := svm.ExecuteContract(ctx, contractAddr, "Initialize", nil)

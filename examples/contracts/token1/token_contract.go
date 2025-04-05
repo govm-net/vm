@@ -1,47 +1,39 @@
-// 基于wasm包装层的简单令牌合约示例
+// A simple token contract example based on WASM wrapper
 package token
 
 import (
 	"github.com/govm-net/vm/core"
 )
 
-// 常量定义 - 对象中的字段名
+// Constants - Field names in objects
 const (
-	// 默认Object中的字段
-	TokenNameKey        = "name"         // 令牌名称
-	TokenSymbolKey      = "symbol"       // 令牌符号
-	TokenDecimalsKey    = "decimals"     // 令牌小数位
-	TokenTotalSupplyKey = "total_supply" // 总供应量
-	TokenAmountKey      = "amount"       // 余额
+	// Fields in default Object
+	TokenNameKey        = "name"         // Token name
+	TokenSymbolKey      = "symbol"       // Token symbol
+	TokenDecimalsKey    = "decimals"     // Token decimals
+	TokenTotalSupplyKey = "total_supply" // Total supply
+	TokenAmountKey      = "amount"       // Balance amount
 )
 
-// 初始化令牌合约
+// Initialize token contract
 func InitializeToken(ctx core.Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
-	// 获取默认Object（空ObjectID）
+	// Get default Object (empty ObjectID)
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	core.Request(err)
+	core.Assert(err)
 
-	// 存储令牌基本信息
-	err = defaultObj.Set(TokenNameKey, name)
-	core.Request(err)
-
-	err = defaultObj.Set(TokenSymbolKey, symbol)
-	core.Request(err)
-
-	err = defaultObj.Set(TokenDecimalsKey, decimals)
-	core.Request(err)
-
-	err = defaultObj.Set(TokenTotalSupplyKey, totalSupply)
-	core.Request(err)
+	// Store token basic information
+	core.Assert(defaultObj.Set(TokenNameKey, name))
+	core.Assert(defaultObj.Set(TokenSymbolKey, symbol))
+	core.Assert(defaultObj.Set(TokenDecimalsKey, decimals))
+	core.Assert(defaultObj.Set(TokenTotalSupplyKey, totalSupply))
 
 	defaultObj.SetOwner(ctx.Sender())
 
 	obj := ctx.CreateObject()
-	err = obj.Set(TokenAmountKey, totalSupply)
-	core.Request(err)
+	core.Assert(obj.Set(TokenAmountKey, totalSupply))
 	obj.SetOwner(ctx.Sender())
 
-	// 记录初始化事件
+	// Log initialization event
 	ctx.Log("initialize",
 		"id", defaultObj.ID(),
 		"name", name,
@@ -53,78 +45,70 @@ func InitializeToken(ctx core.Context, name string, symbol string, decimals uint
 	return defaultObj.ID()
 }
 
-// 获取令牌信息
+// Get token information
 func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	core.Request(err)
+	core.Assert(err)
 
-	// 读取令牌基本信息
+	// Read token basic information
 	var name string
-	err = defaultObj.Get(TokenNameKey, &name)
-	core.Request(err)
+	core.Assert(defaultObj.Get(TokenNameKey, &name))
 
 	var symbol string
-	err = defaultObj.Get(TokenSymbolKey, &symbol)
-	core.Request(err)
+	core.Assert(defaultObj.Get(TokenSymbolKey, &symbol))
 
 	var decimals uint8
-	err = defaultObj.Get(TokenDecimalsKey, &decimals)
-	core.Request(err)
+	core.Assert(defaultObj.Get(TokenDecimalsKey, &decimals))
 
 	var totalSupply uint64
-	err = defaultObj.Get(TokenTotalSupplyKey, &totalSupply)
-	core.Request(err)
+	core.Assert(defaultObj.Get(TokenTotalSupplyKey, &totalSupply))
 
 	return name, symbol, decimals, totalSupply
 }
 
-// 获取所有者
+// Get contract owner
 func GetOwner(ctx core.Context) core.Address {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	core.Request(err)
+	core.Assert(err)
 
 	return defaultObj.Owner()
 }
 
-// 获取账户余额
+// Get account balance
 func BalanceOf(ctx core.Context, owner core.Address) uint64 {
 	obj, err := ctx.GetObjectWithOwner(owner)
-	core.Request(err)
+	core.Assert(err)
 
 	var balance uint64
-	err = obj.Get(TokenAmountKey, &balance)
-	core.Request(err)
+	core.Assert(obj.Get(TokenAmountKey, &balance))
 
 	return balance
 }
 
-// 转账令牌给其他地址
+// Transfer tokens to another address
 func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
 	from := ctx.Sender()
 
-	// 检查金额有效性
-	core.Request(amount > 0)
+	// Check amount validity
+	core.Assert(amount > 0)
 	obj, err := ctx.GetObjectWithOwner(from)
-	core.Request(err)
+	core.Assert(err)
 
 	var fromBalance uint64
-	err = obj.Get(TokenAmountKey, &fromBalance)
-	core.Request(err)
+	core.Assert(obj.Get(TokenAmountKey, &fromBalance))
 
-	// 检查余额充足
-	core.Request(fromBalance >= amount)
+	// Check if balance is sufficient
+	core.Assert(fromBalance >= amount)
 
-	err = obj.Set(TokenAmountKey, fromBalance-amount)
-	core.Request(err)
+	core.Assert(obj.Set(TokenAmountKey, fromBalance-amount))
 
 	toObj := ctx.CreateObject()
-	err = toObj.Set(TokenAmountKey, amount)
-	core.Request(err)
+	core.Assert(toObj.Set(TokenAmountKey, amount))
 	toObj.SetOwner(to)
 
-	// 记录转账事件
+	// Log transfer event
 	ctx.Log("transfer",
 		"from", from,
 		"to", to,
@@ -133,60 +117,56 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
 	return true
 }
 
+// Collect balances from multiple objects into one
 func Collect(ctx core.Context, ids []core.ObjectID) bool {
 	sender := ctx.Sender()
 
-	// 检查ids是否为空
-	core.Request(len(ids) > 1)
+	// Check if ids is not empty
+	core.Assert(len(ids) > 1)
 	var amount uint64
-	//将其他的object里的余额迁移到第一个object
+	// Migrate balances from other objects to the first object
 	for i := 1; i < len(ids); i++ {
 		id := ids[i]
 		obj, err := ctx.GetObject(id)
-		core.Request(err)
-		core.Request(obj.Owner() == sender)
+		core.Assert(err)
+		core.Assert(obj.Owner() == sender)
 		var balance uint64
-		err = obj.Get(TokenAmountKey, &balance)
-		core.Request(err)
+		core.Assert(obj.Get(TokenAmountKey, &balance))
 		amount += balance
 		ctx.DeleteObject(id)
 	}
 	obj, err := ctx.GetObject(ids[0])
-	core.Request(err)
-	core.Request(obj.Owner() == sender)
-	err = obj.Set(TokenAmountKey, amount)
-	core.Request(err)
+	core.Assert(err)
+	core.Assert(obj.Owner() == sender)
+	core.Assert(obj.Set(TokenAmountKey, amount))
 
 	return true
 }
 
-// 铸造新令牌（仅限所有者）
+// Mint new tokens (owner only)
 func Mint(ctx core.Context, to core.Address, amount uint64) bool {
 	sender := ctx.Sender()
 
-	// 检查金额有效性
-	core.Request(amount > 0)
+	// Check amount validity
+	core.Assert(amount > 0)
 
-	// 获取默认Object
+	// Get default Object
 	obj, err := ctx.GetObject(core.ZeroObjectID)
-	core.Request(err)
-	core.Request(obj.Owner() == sender)
+	core.Assert(err)
+	core.Assert(obj.Owner() == sender)
 
-	// 获取当前总供应量
+	// Get current total supply
 	var totalSupply uint64
-	err = obj.Get(TokenTotalSupplyKey, &totalSupply)
-	core.Request(err)
+	core.Assert(obj.Get(TokenTotalSupplyKey, &totalSupply))
 
 	totalSupply += amount
-	err = obj.Set(TokenTotalSupplyKey, totalSupply)
-	core.Request(err)
+	core.Assert(obj.Set(TokenTotalSupplyKey, totalSupply))
 
 	toObj := ctx.CreateObject()
-	err = toObj.Set(TokenAmountKey, amount)
-	core.Request(err)
+	core.Assert(toObj.Set(TokenAmountKey, amount))
 	toObj.SetOwner(to)
 
-	// 记录铸造事件
+	// Log mint event
 	ctx.Log("mint",
 		"to", to,
 		"amount", amount,
@@ -195,44 +175,45 @@ func Mint(ctx core.Context, to core.Address, amount uint64) bool {
 	return true
 }
 
-// 销毁令牌
+// Burn tokens
 func Burn(ctx core.Context, id core.ObjectID, amount uint64) bool {
 	sender := ctx.Sender()
 
-	core.Request(amount > 0)
+	core.Assert(amount > 0)
 
-	// 获取默认Object
+	// Get default Object
 	obj, err := ctx.GetObject(core.ZeroObjectID)
-	core.Request(err)
-	core.Request(obj.Owner() == sender)
+	core.Assert(err)
+	core.Assert(obj.Owner() == sender)
 
-	// 获取当前总供应量
+	// Get current total supply
 	var totalSupply uint64
-	err = obj.Get(TokenTotalSupplyKey, &totalSupply)
-	core.Request(err)
+	core.Assert(obj.Get(TokenTotalSupplyKey, &totalSupply))
 
 	totalSupply -= amount
-	err = obj.Set(TokenTotalSupplyKey, totalSupply)
-	core.Request(err)
+	core.Assert(obj.Set(TokenTotalSupplyKey, totalSupply))
 
 	var userObj core.Object
 	if id == core.ZeroObjectID {
 		userObj, err = ctx.GetObjectWithOwner(sender)
-		core.Request(err)
+		core.Assert(err)
 	} else {
 		userObj, err = ctx.GetObject(id)
-		core.Request(err)
+		core.Assert(err)
 	}
 
 	var userBalance uint64
-	err = userObj.Get(TokenAmountKey, &userBalance)
-	core.Request(err)
+	core.Assert(userObj.Get(TokenAmountKey, &userBalance))
+	core.Assert(userBalance >= amount)
 
 	userBalance -= amount
-	err = userObj.Set(TokenAmountKey, userBalance)
-	core.Request(err)
+	if userBalance == 0 {
+		ctx.DeleteObject(userObj.ID())
+	} else {
+		core.Assert(userObj.Set(TokenAmountKey, userBalance))
+	}
 
-	// 记录销毁事件
+	// Log burn event
 	ctx.Log("burn",
 		"from", sender,
 		"amount", amount,

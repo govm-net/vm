@@ -8,34 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/govm-net/vm/api"
+	"github.com/govm-net/vm/context/memory"
 	"github.com/govm-net/vm/core"
-	"github.com/govm-net/vm/wasi"
 )
 
 //go:embed testdata/counter_contract.go
 var counterContractCode []byte
-
-func init() {
-	// old := api.DefaultGoModGenerator
-	api.DefaultGoModGenerator = func(moduleName string, imports map[string]string, replaces map[string]string) string {
-		pwd, err := os.Getwd()
-		if err != nil {
-			panic(err)
-		}
-		return fmt.Sprintf(`
-	module %s
-
-go 1.23.0
-
-require (
-	github.com/govm-net/vm v1.0.0
-)
-
-replace github.com/govm-net/vm => %s/../
-`, moduleName, pwd)
-	}
-}
 
 func TestNewEngine(t *testing.T) {
 	// 创建临时目录用于测试
@@ -89,7 +67,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	}
 	defer engine.Close()
 
-	ctx := wasi.NewDefaultBlockchainContext()
+	ctx := memory.NewBlockchainContext(nil)
 	engine = engine.WithContext(ctx)
 
 	// 测试合约代码
@@ -110,7 +88,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	if _, err := os.Stat(abiPath); os.IsNotExist(err) {
 		t.Fatal("ABI file was not created")
 	}
-	ctx.SetExecutionContext(contractAddr, core.ZeroAddress)
+	// ctx.SetExecutionContext(contractAddr, core.ZeroAddress)
 
 	// 执行Initialize函数
 	_, err = engine.Execute(contractAddr, "Initialize", nil)
@@ -171,7 +149,7 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 	}
 	defer engine.Close()
 
-	ctx := wasi.NewDefaultBlockchainContext()
+	ctx := memory.NewBlockchainContext(nil)
 	engine = engine.WithContext(ctx)
 
 	// 测试合约代码
@@ -192,7 +170,7 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 	if _, err := os.Stat(abiPath); os.IsNotExist(err) {
 		t.Fatal("ABI file was not created")
 	}
-	ctx.SetExecutionContext(contractAddr, core.ZeroAddress)
+	// ctx.SetExecutionContext(contractAddr, core.ZeroAddress)
 
 	// 执行Initialize函数
 	_, err = engine.ExecuteContract(contractAddr, "Initialize")

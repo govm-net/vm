@@ -1,117 +1,117 @@
-# Token2 合约
+# Token2 Contract
 
-Token2 是一个基于 WASM 的简单代币合约实现，与 Token1 相比，它采用了更高效的状态存储方式，使用单一 Object 存储所有状态。
+Token2 is a WASM-based simple token contract implementation that uses a more efficient state storage method compared to Token1, storing all states in a single Object.
 
-## 实现特点
+## Implementation Features
 
-1. **单一 Object 存储**
-   - 使用默认 Object 存储所有状态
-   - 不再为每个用户创建独立的余额 Object
-   - 通过字段前缀区分不同用户的数据
+1. **Single Object Storage**
+   - Uses default Object to store all states
+   - No separate balance Objects for individual users
+   - Distinguishes user data using field prefixes
 
-2. **状态存储结构**
-   - 基本信息直接存储在默认 Object 中
-   - 用户余额使用 `balance_` + 用户地址作为 key 存储
-   - 合约所有者信息存储在 `owner` 字段中
+2. **State Storage Structure**
+   - Basic information stored directly in default Object
+   - User balances stored using `balance_` + user address as key
+   - Contract owner information stored in `owner` field
 
-3. **安全性**
-   - 使用自定义的 `owner` 字段管理合约所有权
-   - 保持 Object 原生 owner 为合约本身
-   - 严格的权限控制（mint/burn 仅限所有者）
+3. **Security**
+   - Uses custom `owner` field for contract ownership management
+   - Maintains Object's native owner as the contract itself
+   - Strict permission control (mint/burn limited to owner)
 
-## 主要功能
+## Main Functions
 
-### 1. 初始化合约
+### 1. Initialize Contract
 ```go
 func InitializeToken(ctx core.Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID
 ```
-- 初始化代币基本信息
-- 设置合约所有者
-- 分配初始供应量给创建者
+- Initializes token basic information
+- Sets contract owner
+- Allocates initial supply to creator
 
-### 2. 查询功能
+### 2. Query Functions
 ```go
 func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64)
 func GetOwner(ctx core.Context) core.Address
 func BalanceOf(ctx core.Context, owner core.Address) uint64
 ```
-- 获取代币基本信息
-- 查询合约所有者
-- 查询账户余额
+- Get token basic information
+- Query contract owner
+- Query account balance
 
-### 3. 转账功能
+### 3. Transfer Function
 ```go
 func Transfer(ctx core.Context, to core.Address, amount uint64) bool
 ```
-- 在同一个 Object 中更新发送者和接收者的余额
-- 自动处理接收者首次接收代币的情况
-- 包含余额检查和错误处理
+- Updates sender and recipient balances in the same Object
+- Automatically handles first-time token reception
+- Includes balance checks and error handling
 
-### 4. 铸造功能
+### 4. Minting Function
 ```go
 func Mint(ctx core.Context, to core.Address, amount uint64) bool
 ```
-- 仅限合约所有者调用
-- 增加总供应量
-- 铸造新代币给指定地址
+- Only callable by contract owner
+- Increases total supply
+- Mints new tokens to specified address
 
-### 5. 销毁功能
+### 5. Burning Function
 ```go
 func Burn(ctx core.Context, amount uint64) bool
 ```
-- 仅限合约所有者调用
-- 减少总供应量
-- 从所有者账户销毁代币
+- Only callable by contract owner
+- Decreases total supply
+- Burns tokens from owner's account
 
-## 与 Token1 的主要区别
+## Key Differences from Token1
 
-1. **存储方式**
-   - Token1: 使用多个 Object 存储状态
-   - Token2: 使用单一 Object 存储所有状态
+1. **Storage Method**
+   - Token1: Uses multiple Objects for state storage
+   - Token2: Uses a single Object for all states
 
-2. **所有权管理**
-   - Token1: 依赖 Object 的原生 owner
-   - Token2: 使用自定义 owner 字段
+2. **Ownership Management**
+   - Token1: Relies on Object's native owner
+   - Token2: Uses custom owner field
 
-3. **性能特点**
-   - Token1: 支持并行转账（不同用户的转账可以并行执行）
-   - Token2: 所有操作都需要串行执行（因为共享同一个 Object）
+3. **Performance Characteristics**
+   - Token1: Supports parallel transfers (transfers between different users can execute in parallel)
+   - Token2: All operations must execute serially (due to shared Object)
 
-4. **功能扩展**
-   - Token1: 无法实现 approve 功能（因为用户无法操作他人的 Object）
-   - Token2: 可以实现 approve 功能（因为所有状态在同一个 Object 中）
+4. **Functional Extensions**
+   - Token1: Cannot implement approve functionality (users cannot operate others' Objects)
+   - Token2: Can implement approve functionality (all states in single Object)
 
-5. **状态访问**
-   - Token1: 需要获取多个 Object
-   - Token2: 只需访问单一 Object
+5. **State Access**
+   - Token1: Requires accessing multiple Objects
+   - Token2: Only needs to access single Object
 
-## 使用示例
+## Usage Examples
 
 ```go
-// 初始化代币
+// Initialize token
 InitializeToken(ctx, "MyToken", "MTK", 18, 1000000)
 
-// 查询代币信息
+// Query token information
 name, symbol, decimals, totalSupply := GetTokenInfo(ctx)
 
-// 查询余额
+// Query balance
 balance := BalanceOf(ctx, userAddress)
 
-// 转账
+// Transfer tokens
 Transfer(ctx, recipientAddress, 100)
 
-// 铸造新代币（仅限所有者）
+// Mint new tokens (owner only)
 Mint(ctx, recipientAddress, 1000)
 
-// 销毁代币（仅限所有者）
+// Burn tokens (owner only)
 Burn(ctx, 500)
 ```
 
-## 注意事项
+## Important Notes
 
-1. 合约所有者通过 `owner` 字段管理，而不是 Object 的原生 owner
-2. 首次接收代币的地址会自动创建余额记录
-3. 所有操作都包含适当的错误处理和状态回滚机制
-4. 合约事件记录所有重要操作
-5. 所有操作都需要串行执行，可能影响性能
-6. 支持实现 approve 功能，适合需要授权场景 
+1. Contract owner is managed through `owner` field, not Object's native owner
+2. Balance records are automatically created for first-time token recipients
+3. All operations include proper error handling and state rollback mechanisms
+4. Contract events record all important operations
+5. All operations must execute serially, which may impact performance
+6. Supports approve functionality, suitable for authorization scenarios 

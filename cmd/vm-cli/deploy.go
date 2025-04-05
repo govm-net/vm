@@ -6,82 +6,72 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/govm-net/vm/api"
+	"github.com/govm-net/vm/context"
+	_ "github.com/govm-net/vm/context/db"
+	_ "github.com/govm-net/vm/context/memory"
 	"github.com/govm-net/vm/vm"
-	"github.com/spf13/cobra"
 )
 
-var (
-	sourceFile string
-	repoDir    string
-	wasmDir    string
-)
+func runDeploy(sourceFile, repoDir, wasmDir string) error {
+	// 检查必需参数
+	if sourceFile == "" {
+		return fmt.Errorf("source file is required")
+	}
 
-var deployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "Deploy a smart contract",
-	Long: `Deploy a smart contract to the VM system.
-Example: vm-cli deploy -f contract.go -r /path/to/repo -w /path/to/wasm`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// 读取源代码文件
-		code, err := os.ReadFile(sourceFile)
-		if err != nil {
-			return fmt.Errorf("failed to read source file: %w", err)
-		}
+	// 读取源代码文件
+	code, err := os.ReadFile(sourceFile)
+	if err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
 
-		api.DefaultGoModGenerator = func(moduleName string, imports map[string]string, replaces map[string]string) string {
-			pwd, err := os.Getwd()
-			if err != nil {
-				panic(err)
-			}
-			return fmt.Sprintf(`
-		module %s
-	
-	go 1.23.0
-	
-	require (
-		github.com/govm-net/vm v1.0.0
-	)
-	
-	replace github.com/govm-net/vm => %s/../../
-	`, moduleName, pwd)
-		}
+	// 获取当前工作目录
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
 
-		// 创建VM引擎配置
-		config := &vm.Config{
-			MaxContractSize:  1024 * 1024, // 1MB
-			CodeManagerDir:   repoDir,
-			WASIContractsDir: wasmDir,
-		}
+	// 如果路径是相对路径，则基于当前目录
+	if !filepath.IsAbs(repoDir) {
+		repoDir = filepath.Join(currentDir, repoDir)
+	}
+	if !filepath.IsAbs(wasmDir) {
+		wasmDir = filepath.Join(currentDir, wasmDir)
+	}
 
-		slog.Info("deploying contract", "config", config)
+	// 确保目录存在
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		return fmt.Errorf("failed to create repo directory: %w", err)
+	}
+	if err := os.MkdirAll(wasmDir, 0755); err != nil {
+		return fmt.Errorf("failed to create wasm directory: %w", err)
+	}
 
-		// 创建VM引擎
-		engine, err := vm.NewEngine(config)
-		if err != nil {
-			return fmt.Errorf("failed to create VM engine: %w", err)
-		}
-		defer engine.Close()
+	// 创建VM引擎配置
+	config := &vm.Config{
+		MaxContractSize:  1024 * 1024, // 1MB
+		CodeManagerDir:   repoDir,
+		WASIContractsDir: wasmDir,
+		ContextType:      string(context.DBContextType),
+	}
 
-		// 部署合约
-		address, err := engine.DeployContract(code)
-		if err != nil {
-			return fmt.Errorf("failed to deploy contract: %w", err)
-		}
+	slog.Info("deploying contract", "config", config)
 
-		fmt.Printf("Contract deployed successfully!\n")
-		fmt.Printf("Contract address: %s\n", address)
-		fmt.Printf("Contract files are stored in: %s\n", filepath.Join(repoDir, address.String()))
+	// 创建VM引擎
+	engine, err := vm.NewEngine(config)
+	if err != nil {
+		return fmt.Errorf("failed to create VM engine: %w", err)
+	}
+	defer engine.Close()
 
-		return nil
-	},
-}
+	// 部署合约
+	address, err := engine.DeployContract(code)
+	if err != nil {
+		return fmt.Errorf("failed to deploy contract: %w", err)
+	}
 
-func init() {
-	deployCmd.Flags().StringVarP(&sourceFile, "file", "f", "", "Source file of the contract (required)")
-	deployCmd.Flags().StringVarP(&repoDir, "repo", "r", "", "Repository directory")
-	deployCmd.Flags().StringVarP(&wasmDir, "wasm", "w", "", "WASM directory")
-	deployCmd.MarkFlagRequired("file")
-	deployCmd.MarkFlagRequired("repo")
-	deployCmd.MarkFlagRequired("wasm")
+	fmt.Printf("Contract deployed successfully!\n")
+	fmt.Printf("Contract address: %s\n", address)
+	fmt.Printf("Contract files are stored in: %s\n", filepath.Join(repoDir, address.String()))
+
+	return nil
 }

@@ -2,7 +2,12 @@
 // 合约开发者只需了解并使用此文件中的接口即可编写智能合约
 package core
 
-import "encoding/hex"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"strings"
+)
 
 // Address 表示区块链上的地址
 type Address [20]byte
@@ -21,11 +26,14 @@ func (id ObjectID) String() string {
 }
 
 func IDFromString(str string) ObjectID {
+	str = strings.TrimPrefix(str, "0x")
 	id, err := hex.DecodeString(str)
 	if err != nil {
 		return ZeroObjectID
 	}
-	return ObjectID(id)
+	var out ObjectID
+	copy(out[:], id)
+	return out
 }
 
 func (addr Address) String() string {
@@ -33,11 +41,14 @@ func (addr Address) String() string {
 }
 
 func AddressFromString(str string) Address {
+	str = strings.TrimPrefix(str, "0x")
 	addr, err := hex.DecodeString(str)
 	if err != nil {
 		return ZeroAddress
 	}
-	return Address(addr)
+	var out Address
+	copy(out[:], addr)
+	return out
 }
 
 func (h Hash) String() string {
@@ -45,11 +56,18 @@ func (h Hash) String() string {
 }
 
 func HashFromString(str string) Hash {
+	str = strings.TrimPrefix(str, "0x")
 	h, err := hex.DecodeString(str)
 	if err != nil {
 		return ZeroHash
 	}
-	return Hash(h)
+	var out Hash
+	copy(out[:], h)
+	return out
+}
+
+func GetHash(data []byte) Hash {
+	return Hash(sha256.Sum256(data))
 }
 
 // Context 是合约与区块链环境交互的主要接口
@@ -89,15 +107,19 @@ type Object interface {
 	Set(field string, value any) error // 设置字段值
 }
 
-func Request(condition any) {
+func Assert(condition any) {
 	switch v := condition.(type) {
 	case bool:
 		if !v {
-			panic("request failed")
+			panic("assertion failed")
 		}
 	case error:
 		if v != nil {
 			panic(v)
 		}
 	}
+}
+
+func Error(msg string) error {
+	return errors.New(msg)
 }

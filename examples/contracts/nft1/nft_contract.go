@@ -1,55 +1,37 @@
-// 基于wasm包装层的简单NFT合约示例
+// A simple NFT contract example based on WASM wrapper
 package nft
 
 import (
-	"fmt"
-
 	"github.com/govm-net/vm/core"
 )
 
-// 常量定义 - 对象中的字段名
+// Constants - Field names in objects
 const (
-	// 默认Object中的字段
-	NFTNameKey        = "name"         // NFT名称
-	NFTSymbolKey      = "symbol"       // NFT符号
-	NFTTotalSupplyKey = "total_supply" // 总供应量
+	// Fields in default Object
+	NFTNameKey        = "name"         // NFT name
+	NFTSymbolKey      = "symbol"       // NFT symbol
+	NFTTotalSupplyKey = "total_supply" // Total supply
 	NFTTokenURIKey    = "token_uri"    // Token URI
 	NFTTokenIDKey     = "token_id"     // Token ID
-	NFTTokenOwnerKey  = "owner"        // Token所有者
+	NFTTokenOwnerKey  = "owner"        // Token owner
 )
 
-// 初始化NFT合约
+// Initialize NFT contract
 func InitializeNFT(ctx core.Context, name string, symbol string) core.ObjectID {
-	// 获取默认Object（空ObjectID）
+	// Get default Object (empty ObjectID)
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return core.ZeroObjectID
-	}
+	core.Assert(err)
 
-	// 存储NFT基本信息
-	err = defaultObj.Set(NFTNameKey, name)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储NFT名称失败: %v", err))
-		return core.ZeroObjectID
-	}
+	// Store NFT basic information
+	core.Assert(defaultObj.Set(NFTNameKey, name))
+	core.Assert(defaultObj.Set(NFTSymbolKey, symbol))
 
-	err = defaultObj.Set(NFTSymbolKey, symbol)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("存储NFT符号失败: %v", err))
-		return core.ZeroObjectID
-	}
-
-	// 初始化总供应量为0
-	err = defaultObj.Set(NFTTotalSupplyKey, uint64(0))
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("初始化总供应量失败: %v", err))
-		return core.ZeroObjectID
-	}
+	// Initialize total supply as 0
+	core.Assert(defaultObj.Set(NFTTotalSupplyKey, uint64(0)))
 
 	defaultObj.SetOwner(ctx.Sender())
 
-	// 记录初始化事件
+	// Log initialization event
 	ctx.Log("initialize",
 		"id", defaultObj.ID(),
 		"name", name,
@@ -59,169 +41,109 @@ func InitializeNFT(ctx core.Context, name string, symbol string) core.ObjectID {
 	return defaultObj.ID()
 }
 
-// 获取NFT信息
+// Get NFT information
 func GetNFTInfo(ctx core.Context) (string, string, uint64) {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return "", "", 0
-	}
+	core.Assert(err)
 
-	// 读取NFT基本信息
+	// Read NFT basic information
 	var name string
-	err = defaultObj.Get(NFTNameKey, &name)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT名称失败: %v", err))
-		return "", "", 0
-	}
+	core.Assert(defaultObj.Get(NFTNameKey, &name))
 
 	var symbol string
-	err = defaultObj.Get(NFTSymbolKey, &symbol)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT符号失败: %v", err))
-		return "", "", 0
-	}
+	core.Assert(defaultObj.Get(NFTSymbolKey, &symbol))
 
 	var totalSupply uint64
-	err = defaultObj.Get(NFTTotalSupplyKey, &totalSupply)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取总供应量失败: %v", err))
-		return "", "", 0
-	}
+	core.Assert(defaultObj.Get(NFTTotalSupplyKey, &totalSupply))
 
 	return name, symbol, totalSupply
 }
 
-// 获取所有者
+// Get contract owner
 func GetOwner(ctx core.Context) core.Address {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return core.ZeroAddress
-	}
+	core.Assert(err)
 
 	return defaultObj.Owner()
 }
 
-// 获取NFT所有者
+// Get NFT owner
 func OwnerOf(ctx core.Context, tokenId core.ObjectID) core.Address {
-
-	// 获取NFT对象
+	// Get NFT object
 	nftObj, err := ctx.GetObject(tokenId)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT对象失败: %v", err))
-		return core.ZeroAddress
-	}
+	core.Assert(err)
 
 	return nftObj.Owner()
 }
 
-// 获取NFT URI
+// Get NFT URI
 func TokenURI(ctx core.Context, tokenId core.ObjectID) string {
-	// 获取NFT对象
+	// Get NFT object
 	nftObj, err := ctx.GetObject(tokenId)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT对象失败: %v", err))
-		return ""
-	}
+	core.Assert(err)
 
 	var uri string
-	err = nftObj.Get(NFTTokenURIKey, &uri)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT URI失败: %v", err))
-		return ""
-	}
+	core.Assert(nftObj.Get(NFTTokenURIKey, &uri))
 
 	return uri
 }
 
-// 铸造新NFT（仅限所有者）
-func Mint(ctx core.Context, to core.Address, tokenURI string) (uint64, bool) {
+// Mint new NFT (owner only)
+func Mint(ctx core.Context, to core.Address, tokenURI string) core.ObjectID {
 	sender := ctx.Sender()
 
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return 0, false
-	}
+	core.Assert(err)
 
-	// 检查是否为合约所有者
-	if sender != defaultObj.Owner() {
-		ctx.Log("error", "message", "只有合约所有者才能铸造新NFT")
-		return 0, false
-	}
+	// Check if sender is contract owner
+	core.Assert(sender == defaultObj.Owner())
 
-	// 获取当前总供应量
+	// Get current total supply
 	var totalSupply uint64
-	err = defaultObj.Get(NFTTotalSupplyKey, &totalSupply)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取总供应量失败: %v", err))
-		return 0, false
-	}
+	core.Assert(defaultObj.Get(NFTTotalSupplyKey, &totalSupply))
+	totalSupply += 1
 
-	// 创建新的NFT对象
+	// Create new NFT object
 	nftObj := ctx.CreateObject()
-	err = nftObj.Set(NFTTokenURIKey, tokenURI)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("设置NFT URI失败: %v", err))
-		return 0, false
-	}
+	core.Assert(nftObj.Set(NFTTokenURIKey, tokenURI))
+	core.Assert(nftObj.Set(NFTTokenIDKey, totalSupply))
 
-	err = nftObj.Set(NFTTokenIDKey, totalSupply+1)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("设置NFT ID失败: %v", err))
-		return 0, false
-	}
-
-	// 设置NFT所有者
+	// Set NFT owner
 	nftObj.SetOwner(to)
 
-	// 更新总供应量
-	err = defaultObj.Set(NFTTotalSupplyKey, totalSupply+1)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("更新总供应量失败: %v", err))
-		return 0, false
-	}
+	// Update total supply
+	core.Assert(defaultObj.Set(NFTTotalSupplyKey, totalSupply))
 
-	// 记录铸造事件
+	// Log mint event
 	ctx.Log("mint",
 		"to", to,
-		"token_id", totalSupply+1,
+		"token_id", totalSupply,
 		"token_uri", tokenURI)
 
-	return totalSupply + 1, true
+	return nftObj.ID()
 }
 
-// 转移NFT
+// Transfer NFT
 func Transfer(ctx core.Context, from core.Address, to core.Address, tokenId core.ObjectID) bool {
 	sender := ctx.Sender()
 
-	// 获取NFT对象
+	// Get NFT object
 	nftObj, err := ctx.GetObject(tokenId)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT对象失败: %v", err))
-		return false
-	}
+	core.Assert(err)
 
-	// 检查发送者是否为NFT所有者
-	if sender != nftObj.Owner() {
-		ctx.Log("error", "message", "只有NFT所有者才能转移NFT")
-		return false
-	}
+	// Check if sender is NFT owner
+	core.Assert(sender == nftObj.Owner())
 
-	// 检查from地址
-	if from != nftObj.Owner() {
-		ctx.Log("error", "message", "from地址必须是NFT所有者")
-		return false
-	}
+	// Check from address
+	core.Assert(from == nftObj.Owner())
 
-	// 转移NFT所有权
+	// Transfer NFT ownership
 	nftObj.SetOwner(to)
 
-	// 记录转移事件
+	// Log transfer event
 	ctx.Log("transfer",
 		"from", from,
 		"to", to,
@@ -230,49 +152,32 @@ func Transfer(ctx core.Context, from core.Address, to core.Address, tokenId core
 	return true
 }
 
-// 销毁NFT
+// Burn NFT
 func Burn(ctx core.Context, tokenId core.ObjectID) bool {
 	sender := ctx.Sender()
 
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
-		return false
-	}
+	core.Assert(err)
 
-	// 获取NFT对象
+	// Get NFT object
 	nftObj, err := ctx.GetObject(tokenId)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取NFT对象失败: %v", err))
-		return false
-	}
+	core.Assert(err)
 
-	// 检查是否为NFT所有者
-	if sender != nftObj.Owner() {
-		ctx.Log("error", "message", "只有NFT所有者才能销毁NFT")
-		return false
-	}
+	// Check if sender is NFT owner
+	core.Assert(sender == nftObj.Owner())
 
-	// 获取当前总供应量
+	// Get current total supply
 	var totalSupply uint64
-	err = defaultObj.Get(NFTTotalSupplyKey, &totalSupply)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("获取总供应量失败: %v", err))
-		return false
-	}
+	core.Assert(defaultObj.Get(NFTTotalSupplyKey, &totalSupply))
 
-	// 更新总供应量
-	err = defaultObj.Set(NFTTotalSupplyKey, totalSupply-1)
-	if err != nil {
-		ctx.Log("error", "message", fmt.Sprintf("更新总供应量失败: %v", err))
-		return false
-	}
+	// Update total supply
+	core.Assert(defaultObj.Set(NFTTotalSupplyKey, totalSupply-1))
 
-	// 销毁NFT对象
+	// Delete NFT object
 	ctx.DeleteObject(nftObj.ID())
 
-	// 记录销毁事件
+	// Log burn event
 	ctx.Log("burn",
 		"from", sender,
 		"token_id", tokenId)
