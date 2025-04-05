@@ -41,8 +41,7 @@ func TestGenerateHandlerFile(t *testing.T) {
 		PackageName: "testcontract",
 		Functions: []Function{
 			{
-				Name:       "ProcessUser",
-				IsExported: true,
+				Name: "ProcessUser",
 				Inputs: []Parameter{
 					{Name: "user", Type: "*User"},
 				},
@@ -51,8 +50,7 @@ func TestGenerateHandlerFile(t *testing.T) {
 				},
 			},
 			{
-				Name:       "CreateOrder",
-				IsExported: true,
+				Name: "CreateOrder",
 				Inputs: []Parameter{
 					{Name: "order", Type: "*Order"},
 				},
@@ -183,17 +181,15 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
 		PackageName: "testcontract",
 		Functions: []Function{
 			{
-				Name:       "GetBalance",
-				IsExported: true,
-				Inputs:     []Parameter{}, // 无入参
+				Name:   "GetBalance",
+				Inputs: []Parameter{}, // 无入参
 				Outputs: []Parameter{
 					{Name: "", Type: "uint64"},
 				},
 			},
 			{
-				Name:       "GetTimestamp",
-				IsExported: true,
-				Inputs:     []Parameter{}, // 无入参
+				Name:   "GetTimestamp",
+				Inputs: []Parameter{}, // 无入参
 				Outputs: []Parameter{
 					{Name: "", Type: "int64"},
 				},

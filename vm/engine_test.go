@@ -8,12 +8,34 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/wasi"
 )
 
 //go:embed testdata/counter_contract.go
 var counterContractCode []byte
+
+func init() {
+	// old := api.DefaultGoModGenerator
+	api.DefaultGoModGenerator = func(moduleName string, imports map[string]string, replaces map[string]string) string {
+		pwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		return fmt.Sprintf(`
+	module %s
+
+go 1.23.0
+
+require (
+	github.com/govm-net/vm v1.0.0
+)
+
+replace github.com/govm-net/vm => %s/../
+`, moduleName, pwd)
+	}
+}
 
 func TestNewEngine(t *testing.T) {
 	// 创建临时目录用于测试
@@ -27,6 +49,7 @@ func TestNewEngine(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
+		CodeManagerDir:   filepath.Join(tmpDir, "code"),
 	}
 
 	// 创建引擎实例
@@ -56,6 +79,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
+		CodeManagerDir:   filepath.Join(tmpDir, "code"),
 	}
 
 	// 创建引擎实例
@@ -137,6 +161,7 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 	config := &Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
+		CodeManagerDir:   filepath.Join(tmpDir, "code"),
 	}
 
 	// 创建引擎实例

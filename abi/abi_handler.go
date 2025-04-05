@@ -25,8 +25,8 @@ func NewHandlerGenerator(abi *ABI) *HandlerGenerator {
 	}
 }
 
-// format formats the generated code using gofmt
-func format(code string) (string, error) {
+// Format formats the generated code using gofmt
+func Format(code string) (string, error) {
 	// 创建临时目录
 	tmpDir, err := os.MkdirTemp("", "vm-handler-*")
 	if err != nil {
@@ -70,9 +70,6 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	imports["fmt"] = ""
 	imports["encoding/json"] = ""
 	for _, fn := range g.abi.Functions {
-		if !fn.IsExported {
-			continue
-		}
 
 		// 检查输入参数类型
 		for _, input := range fn.Inputs {
@@ -109,9 +106,6 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 
 	// 为每个导出函数生成参数结构体和 handler
 	for _, fn := range g.abi.Functions {
-		if !fn.IsExported {
-			continue
-		}
 		sb.WriteString(g.generateParamStruct(fn))
 		sb.WriteString(g.generateHandler(fn))
 	}
@@ -261,7 +255,7 @@ func GenerateHandlerFile(abi *ABI) (string, error) {
 	}
 
 	// 格式化代码
-	formattedCode, err := format(code)
+	formattedCode, err := Format(code)
 	if err != nil {
 		return "", fmt.Errorf("failed to format code: %w", err)
 	}

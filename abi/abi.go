@@ -24,10 +24,9 @@ type ABI struct {
 
 // Function represents a function in the contract
 type Function struct {
-	Name       string      `json:"name,omitempty"`
-	Inputs     []Parameter `json:"inputs,omitempty"`
-	Outputs    []Parameter `json:"outputs,omitempty"`
-	IsExported bool        `json:"is_exported,omitempty"`
+	Name    string      `json:"name,omitempty"`
+	Inputs  []Parameter `json:"inputs,omitempty"`
+	Outputs []Parameter `json:"outputs,omitempty"`
 }
 
 // Event represents a contract event (from core.Context.Log calls)
@@ -82,8 +81,7 @@ func ExtractABI(code []byte) (*ABI, error) {
 			}
 
 			function := Function{
-				Name:       funcDecl.Name.Name,
-				IsExported: true,
+				Name: funcDecl.Name.Name,
 			}
 
 			// Extract input parameters

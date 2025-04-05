@@ -22,10 +22,7 @@ type ContractConfig struct {
 	MaxCodeSize uint64
 
 	// AllowedImports contains the packages that can be imported by contracts
-	AllowedImports map[string]string
-
-	// Replaces contains the packages that can be replaced by contracts
-	Replaces map[string]string
+	AllowedImports []string
 }
 
 type IContractConfigGenerator func() ContractConfig
@@ -35,13 +32,10 @@ var DefaultContractConfig IContractConfigGenerator = func() ContractConfig {
 		MaxGas:       1000000,
 		MaxCallDepth: 8,
 		MaxCodeSize:  1024 * 1024, // 1MB
-		AllowedImports: map[string]string{
-			"github.com/govm-net/vm": "v1.0.0",
+		AllowedImports: []string{
+			"github.com/govm-net/vm/core",
 			// Additional allowed imports would be listed here
 		},
-		// Replaces: map[string]string{
-		// 	"github.com/govm-net/vm": "./",
-		// },
 	}
 }
 
@@ -80,15 +74,17 @@ var DefaultContractAddressGenerator IContractAddressGenerator = func(code []byte
 type IGoModGenerator func(moduleName string, imports map[string]string, replaces map[string]string) string
 
 var DefaultGoModGenerator IGoModGenerator = func(moduleName string, imports, replaces map[string]string) string {
-	content := fmt.Sprintf("module %s\n\n", moduleName)
-	content += "go 1.23\n\n"
-	for imp, ver := range imports {
-		content += fmt.Sprintf("require %s %s\n", imp, ver)
-	}
-	for old, new := range replaces {
-		content += fmt.Sprintf("replace %s => %s\n", old, new)
-	}
-	return content
+	return fmt.Sprintf(`
+	module %s
+
+go 1.23.0
+
+require (
+	github.com/govm-net/vm v1.0.0
+)
+
+// replace github.com/govm-net/vm => ./
+`, moduleName)
 }
 
 var Builder = "tinygo"

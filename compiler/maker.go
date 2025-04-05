@@ -156,7 +156,7 @@ func (m *Maker) ValidateContract(code []byte) error {
 	}
 
 	// 创建 go.mod 文件
-	goModContent := api.DefaultGoModGenerator(file.Name.Name, m.config.AllowedImports, m.config.Replaces)
+	goModContent := api.DefaultGoModGenerator(file.Name.Name, nil, nil)
 
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return fmt.Errorf("failed to write go.mod: %w", err)
@@ -188,7 +188,7 @@ func (m *Maker) validateImports(file *ast.File) error {
 		importPath := strings.Trim(imp.Path.Value, "\"")
 		allowed := false
 
-		for allowedImport := range m.config.AllowedImports {
+		for _, allowedImport := range m.config.AllowedImports {
 			if importPath == allowedImport || strings.HasPrefix(importPath, allowedImport+"/") {
 				allowed = true
 				break
@@ -317,9 +317,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	// 修改contract.go，添加handler函数的注册
 	registerCode := "\nfunc init() {\n"
 	for _, fn := range abiInfo.Functions {
-		if fn.IsExported {
-			registerCode += fmt.Sprintf("\tregisterContractFunction(\"%s\", handle%s)\n", fn.Name, fn.Name)
-		}
+		registerCode += fmt.Sprintf("\tregisterContractFunction(\"%s\", handle%s)\n", fn.Name, fn.Name)
 	}
 	registerCode += "}\n"
 
@@ -329,7 +327,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 
 	// 创建 go.mod 文件
-	goModContent := api.DefaultGoModGenerator("main", m.config.AllowedImports, m.config.Replaces)
+	goModContent := api.DefaultGoModGenerator("main", nil, nil)
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write go.mod: %w", err)
 	}

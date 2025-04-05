@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/vm"
 	"github.com/spf13/cobra"
 )
@@ -28,20 +29,23 @@ Example: vm-cli deploy -f contract.go -r /path/to/repo -w /path/to/wasm`,
 			return fmt.Errorf("failed to read source file: %w", err)
 		}
 
-		// api.DefaultContractConfig = func() api.ContractConfig {
-		// 	return api.ContractConfig{
-		// 		MaxGas:       1000000,
-		// 		MaxCallDepth: 8,
-		// 		MaxCodeSize:  1024 * 1024, // 1MB
-		// 		AllowedImports: map[string]string{
-		// 			"github.com/govm-net/vm": "v1.0.0",
-		// 			// Additional allowed imports would be listed here
-		// 		},
-		// 		// Replaces: map[string]string{
-		// 		// 	"github.com/govm-net/vm": "./../../../",
-		// 		// },
-		// 	}
-		// }
+		api.DefaultGoModGenerator = func(moduleName string, imports map[string]string, replaces map[string]string) string {
+			pwd, err := os.Getwd()
+			if err != nil {
+				panic(err)
+			}
+			return fmt.Sprintf(`
+		module %s
+	
+	go 1.23.0
+	
+	require (
+		github.com/govm-net/vm v1.0.0
+	)
+	
+	replace github.com/govm-net/vm => %s/../../
+	`, moduleName, pwd)
+		}
 
 		// 创建VM引擎配置
 		config := &vm.Config{

@@ -2,8 +2,10 @@ package compiler
 
 import (
 	"embed"
+	"fmt"
 	"go/parser"
 	"go/token"
+	"os"
 	"testing"
 
 	"github.com/govm-net/vm/api"
@@ -12,14 +14,36 @@ import (
 //go:embed testdata/*.go
 var testContracts embed.FS
 
+func init() {
+	// old := api.DefaultGoModGenerator
+	api.DefaultGoModGenerator = func(moduleName string, imports map[string]string, replaces map[string]string) string {
+		pwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		return fmt.Sprintf(`
+	module %s
+
+go 1.23.0
+
+require (
+	github.com/govm-net/vm v1.0.0
+)
+
+replace github.com/govm-net/vm => %s/../
+`, moduleName, pwd)
+	}
+}
+
 func TestValidateContract(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: map[string]string{
-			"github.com/govm-net/vm/core": "v1.0.0",
+		AllowedImports: []string{
+			"github.com/govm-net/vm/core",
 		},
 	}
+
 	maker := NewMaker(config)
 
 	// Read contract files
@@ -73,8 +97,8 @@ func TestCompileContract(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: map[string]string{
-			"github.com/govm-net/vm/core": "v1.0.0",
+		AllowedImports: []string{
+			"github.com/govm-net/vm/core",
 		},
 	}
 	maker := NewMaker(config)
@@ -108,8 +132,8 @@ func TestValidateNoMaliciousCommands(t *testing.T) {
 	// Create a maker with default config
 	config := api.ContractConfig{
 		MaxCodeSize: 1024 * 1024, // 1MB
-		AllowedImports: map[string]string{
-			"github.com/govm-net/vm/core": "v1.0.0",
+		AllowedImports: []string{
+			"github.com/govm-net/vm/core",
 		},
 	}
 	maker := NewMaker(config)
