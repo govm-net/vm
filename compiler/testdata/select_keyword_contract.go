@@ -1,12 +1,8 @@
-package restrictedcontract
-
-import (
-	"github.com/govm-net/vm/core"
-)
+package testdata
 
 type RestrictedContract struct{}
 
-func (c *RestrictedContract) DoSomething(ctx core.Context) chan string {
+func (c *RestrictedContract) DoSomething() chan string {
 	ch1 := make(chan string)
 	ch2 := make(chan string)
 	go func() {

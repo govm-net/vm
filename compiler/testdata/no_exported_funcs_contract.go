@@ -1,11 +1,7 @@
-package noexportedfuncs
-
-import (
-	"github.com/govm-net/vm/core"
-)
+package testdata
 
 type NoExportedFuncsContract struct{}
 
-func (c *NoExportedFuncsContract) doSomething(ctx core.Context) string {
+func (c *NoExportedFuncsContract) doSomething() string {
 	return "Something"
 }

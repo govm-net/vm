@@ -1,25 +1,24 @@
-package testcontract
+package testdata
 
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/govm-net/vm/core"
 )
 
 type GetUserInfoParams struct {
-	Ctx core.Context `json:"ctx,omitempty"`
-	Id  string       `json:"id,omitempty"`
+	Id string `json:"id,omitempty"`
 }
 
-func handleGetUserInfo(ctx core.Context, params []byte) (any, error) {
+func handleGetUserInfo(params []byte) (any, error) {
 	var args GetUserInfoParams
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &args); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+		}
 	}
 
 	// 调用原始函数
-	result0, result1, result2 := GetUserInfo(ctx, args.Id)
+	result0, result1, result2 := GetUserInfo(args.Id)
 
 	// 处理返回值
 	results := make([]any, 0)
@@ -30,19 +29,20 @@ func handleGetUserInfo(ctx core.Context, params []byte) (any, error) {
 }
 
 type CreateOrderWithDetailsParams struct {
-	Ctx    core.Context `json:"ctx,omitempty"`
-	Userid string       `json:"userID,omitempty"`
-	Amount float64      `json:"amount,omitempty"`
+	Userid string  `json:"userID,omitempty"`
+	Amount float64 `json:"amount,omitempty"`
 }
 
-func handleCreateOrderWithDetails(ctx core.Context, params []byte) (any, error) {
+func handleCreateOrderWithDetails(params []byte) (any, error) {
 	var args CreateOrderWithDetailsParams
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &args); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+		}
 	}
 
 	// 调用原始函数
-	result0, result1, result2 := CreateOrderWithDetails(ctx, args.Userid, args.Amount)
+	result0, result1, result2 := CreateOrderWithDetails(args.Userid, args.Amount)
 
 	// 处理返回值
 	results := make([]any, 0)
@@ -53,18 +53,19 @@ func handleCreateOrderWithDetails(ctx core.Context, params []byte) (any, error) 
 }
 
 type ProcessUserAndOrderParams struct {
-	Ctx  core.Context `json:"ctx,omitempty"`
-	User *User        `json:"user,omitempty"`
+	User *User1 `json:"user,omitempty"`
 }
 
-func handleProcessUserAndOrder(ctx core.Context, params []byte) (any, error) {
+func handleProcessUserAndOrder(params []byte) (any, error) {
 	var args ProcessUserAndOrderParams
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &args); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+		}
 	}
 
 	// 调用原始函数
-	result0, result1, result2 := ProcessUserAndOrder(ctx, args.User)
+	result0, result1, result2 := ProcessUserAndOrder(args.User)
 
 	// 处理返回值
 	results := make([]any, 0)

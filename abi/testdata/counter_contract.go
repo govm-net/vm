@@ -1,5 +1,5 @@
 // 基于wasm包装层的简单计数器合约示例
-package countercontract
+package testdata
 
 import (
 	"github.com/govm-net/vm/core"
@@ -12,76 +12,76 @@ const (
 
 // 初始化合约
 // 此函数是大写开头的，因此会被自动导出并在合约部署时调用
-func Initialize(ctx core.Context) int32 {
+func Initialize() int32 {
 	// 获取合约的默认Object（空ObjectID）
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	core.Request(err)
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
 
 	// 初始化计数器值为0
 	err = defaultObj.Set(CounterKey, uint64(0))
-	core.Request(err)
+	core.Assert(err)
 
-	ctx.Log("initialize", "contract_address", ctx.ContractAddress())
+	core.Log("initialize", "contract_address", core.ContractAddress())
 	return 0
 }
 
 // 增加计数器
-func Increment(ctx core.Context, value uint64) uint64 {
+func Increment(value uint64) uint64 {
 	// 获取默认Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	core.Request(err)
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
 
 	// 获取当前计数器值
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
-	core.Request(err)
+	core.Assert(err)
 
 	// 增加计数器值
 	newValue := currentValue + value
 
 	// 更新计数器值
 	err = defaultObj.Set(CounterKey, newValue)
-	core.Request(err)
+	core.Assert(err)
 
 	// 记录事件
-	ctx.Log("increment",
+	core.Log("increment",
 		"from", currentValue,
 		"add", value,
 		"to", newValue,
-		"sender", ctx.Sender())
+		"sender", core.Sender())
 
 	return newValue
 }
 
 // 获取计数器当前值
-func GetCounter(ctx core.Context) uint64 {
+func GetCounter() uint64 {
 	// 获取默认Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	core.Request(err)
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
 
 	// 获取当前计数器值
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
-	core.Request(err)
+	core.Assert(err)
 
 	return currentValue
 }
 
 // 重置计数器值为0
-func Reset(ctx core.Context) {
+func Reset() {
 	// 检查调用者是否为合约所有者
-	if ctx.Sender() != ctx.ContractAddress() {
+	if core.Sender() != core.ContractAddress() {
 		return
 	}
 
 	// 获取默认Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
-	core.Request(err)
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
 
 	// 重置计数器值为0
 	err = defaultObj.Set(CounterKey, uint64(0))
-	core.Request(err)
+	core.Assert(err)
 
 	// 记录事件
-	ctx.Log("reset", "sender", ctx.Sender())
+	core.Log("reset", "sender", core.Sender())
 }

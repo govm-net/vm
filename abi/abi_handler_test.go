@@ -38,7 +38,7 @@ func compareCode(got, expected string) bool {
 func TestGenerateHandlerFile(t *testing.T) {
 	// 创建一个测试用的 ABI
 	abi := &ABI{
-		PackageName: "testcontract",
+		PackageName: "testdata",
 		Functions: []Function{
 			{
 				Name: "ProcessUser",
@@ -209,13 +209,12 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
         import (
                 "encoding/json"
                 "fmt"
-                "github.com/govm-net/vm/core"
         )
         
         type GetBalanceParams struct {
         }
         
-        func handleGetBalance(ctx core.Context, params []byte) (any, error) {
+        func handleGetBalance(params []byte) (any, error) {
                 // 调用原始函数
                 result0 := GetBalance()
         
@@ -225,7 +224,7 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
         type GetTimestampParams struct {
         }
         
-        func handleGetTimestamp(ctx core.Context, params []byte) (any, error) {
+        func handleGetTimestamp(params []byte) (any, error) {
                 // 调用原始函数
                 result0 := GetTimestamp()
         

@@ -277,13 +277,17 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 
 	// 2. 创建临时目录
-	tmpDir, err := os.MkdirTemp("", "vm-contract-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	var tmpDir string
+	if true {
+		tmpDir, err = os.MkdirTemp("", "vm-contract-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp dir: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+	} else {
+		tmpDir = "./tmp"
+		os.MkdirAll(tmpDir, 0755)
 	}
-	defer os.RemoveAll(tmpDir)
-	// tmpDir := "./tmp"
-	// os.MkdirAll(tmpDir, 0755)
 
 	// 3. 将代码放到临时文件夹，并修改包名为main
 	contractCode := string(code)

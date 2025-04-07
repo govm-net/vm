@@ -66,7 +66,7 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	// 收集所有需要的导入
 	imports := make(map[string]string) // path -> alias
 	// 添加基础导入
-	imports["github.com/govm-net/vm/core"] = ""
+	// imports["github.com/govm-net/vm/core"] = ""
 	imports["fmt"] = ""
 	imports["encoding/json"] = ""
 	for _, fn := range g.abi.Functions {
@@ -167,7 +167,7 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 	var sb strings.Builder
 
 	// 生成函数签名
-	sb.WriteString(fmt.Sprintf("func handle%s(ctx core.Context, params []byte) (any, error) {\n", fn.Name))
+	sb.WriteString(fmt.Sprintf("func handle%s(params []byte) (any, error) {\n", fn.Name))
 
 	// 生成参数解析代码
 	if len(fn.Inputs) > 0 {
@@ -212,11 +212,7 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 		}
 		firstParam = false
 
-		if input.Type == "core.Context" {
-			sb.WriteString("ctx")
-		} else {
-			sb.WriteString(fmt.Sprintf("args.%s", cases.Title(language.English).String(input.Name)))
-		}
+		sb.WriteString(fmt.Sprintf("args.%s", cases.Title(language.English).String(input.Name)))
 	}
 	sb.WriteString(")\n\n")
 

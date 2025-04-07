@@ -2,7 +2,10 @@
 // used by both the host environment and WebAssembly contracts
 package types
 
-import "github.com/govm-net/vm/core"
+import (
+	"encoding/hex"
+	"strings"
+)
 
 // WasmFunctionID defines constants for function IDs used in host-contract communication
 // These constants must be used on both sides (host and contract) to ensure compatibility
@@ -58,8 +61,73 @@ const (
 // HostBufferSize defines the size of the buffer used for data exchange between host and contract
 const HostBufferSize int32 = 2048
 
-type Address = core.Address
-type ObjectID = core.ObjectID
+// Address 表示区块链上的地址
+type Address [20]byte
+
+// ObjectID 表示状态对象的唯一标识符
+type ObjectID [32]byte
+
+type Hash [32]byte
+
+func (id ObjectID) String() string {
+	return hex.EncodeToString(id[:])
+}
+
+func (addr Address) String() string {
+	return hex.EncodeToString(addr[:])
+}
+
+func (h Hash) String() string {
+	return hex.EncodeToString(h[:])
+}
+
+func HashFromString(str string) Hash {
+	str = strings.TrimPrefix(str, "0x")
+	h, err := hex.DecodeString(str)
+	if err != nil {
+		return Hash{}
+	}
+	var out Hash
+	copy(out[:], h)
+	return out
+}
+
+// Context 是合约与区块链环境交互的主要接口
+type Context interface {
+	// 区块链信息相关
+	BlockHeight() uint64      // 获取当前区块高度
+	BlockTime() int64         // 获取当前区块时间戳
+	ContractAddress() Address // 获取当前合约地址
+
+	// 账户操作相关
+	Sender() Address                          // 获取交易发送者或调用合约
+	Balance(addr Address) uint64              // 获取账户余额
+	Transfer(to Address, amount uint64) error // 转账操作
+
+	// 对象存储相关 - 基础状态操作使用panic而非返回error
+	CreateObject() Object                             // 创建新对象，失败时panic
+	GetObject(id ObjectID) (Object, error)            // 获取指定对象，可能返回error
+	GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+	DeleteObject(id ObjectID)                         // 删除对象，失败时panic
+
+	// 跨合约调用
+	Call(contract Address, function string, args ...any) ([]byte, error)
+
+	// 日志与事件
+	Log(eventName string, keyValues ...interface{}) // 记录事件
+}
+
+// Object 接口用于管理区块链状态对象
+type Object interface {
+	ID() ObjectID          // 获取对象ID
+	Owner() Address        // 获取对象所有者
+	Contract() Address     // 获取对象所属合约
+	SetOwner(addr Address) // 设置对象所有者，失败时panic
+
+	// 字段操作
+	Get(field string, value any) error // 获取字段值
+	Set(field string, value any) error // 设置字段值
+}
 
 type TransferParams struct {
 	From   Address `json:"from,omitempty"`
@@ -138,15 +206,15 @@ type HandleContractCallParams struct {
 // Context 是合约与区块链环境交互的主要接口
 type BlockchainContext interface {
 	// set block info and transaction info
-	SetBlockInfo(height uint64, time int64, hash core.Hash) error
-	SetTransactionInfo(hash core.Hash, from Address, to Address, value uint64) error
+	SetBlockInfo(height uint64, time int64, hash Hash) error
+	SetTransactionInfo(hash Hash, from Address, to Address, value uint64) error
 	// 区块链信息相关
-	BlockHeight() uint64        // 获取当前区块高度
-	BlockTime() int64           // 获取当前区块时间戳
-	ContractAddress() Address   // 获取当前合约地址
-	TransactionHash() core.Hash // 获取当前交易哈希
-	SetGasLimit(limit int64)    // 设置gas限制
-	GetGas() int64              // 获取已使用gas
+	BlockHeight() uint64      // 获取当前区块高度
+	BlockTime() int64         // 获取当前区块时间戳
+	ContractAddress() Address // 获取当前合约地址
+	TransactionHash() Hash    // 获取当前交易哈希
+	SetGasLimit(limit int64)  // 设置gas限制
+	GetGas() int64            // 获取已使用gas
 	// 账户操作相关
 	Sender() Address                                // 获取交易发送者或调用合约
 	Balance(addr Address) uint64                    // 获取账户余额

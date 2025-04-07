@@ -1,15 +1,11 @@
-package validcontract
-
-import (
-	"github.com/govm-net/vm/core"
-)
+package testdata
 
 type ValidContract struct{}
 
-func (c *ValidContract) DoSomething(ctx core.Context) string {
+func (c *ValidContract) DoSomething() string {
 	return "Something"
 }
 
-func DoSomething2(ctx core.Context) string {
+func DoSomething2() string {
 	return "Something"
 }

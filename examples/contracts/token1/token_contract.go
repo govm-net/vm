@@ -16,9 +16,9 @@ const (
 )
 
 // Initialize token contract
-func InitializeToken(ctx core.Context, name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
+func InitializeToken(name string, symbol string, decimals uint8, totalSupply uint64) core.ObjectID {
 	// Get default Object (empty ObjectID)
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Store token basic information
@@ -27,28 +27,28 @@ func InitializeToken(ctx core.Context, name string, symbol string, decimals uint
 	core.Assert(defaultObj.Set(TokenDecimalsKey, decimals))
 	core.Assert(defaultObj.Set(TokenTotalSupplyKey, totalSupply))
 
-	defaultObj.SetOwner(ctx.Sender())
+	defaultObj.SetOwner(core.Sender())
 
-	obj := ctx.CreateObject()
+	obj := core.CreateObject()
 	core.Assert(obj.Set(TokenAmountKey, totalSupply))
-	obj.SetOwner(ctx.Sender())
+	obj.SetOwner(core.Sender())
 
 	// Log initialization event
-	ctx.Log("initialize",
+	core.Log("initialize",
 		"id", defaultObj.ID(),
 		"name", name,
 		"symbol", symbol,
 		"decimals", decimals,
 		"total_supply", totalSupply,
-		"owner", ctx.Sender())
+		"owner", core.Sender())
 
 	return defaultObj.ID()
 }
 
 // Get token information
-func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
+func GetTokenInfo() (string, string, uint8, uint64) {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Read token basic information
@@ -68,17 +68,17 @@ func GetTokenInfo(ctx core.Context) (string, string, uint8, uint64) {
 }
 
 // Get contract owner
-func GetOwner(ctx core.Context) core.Address {
+func GetOwner() core.Address {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	return defaultObj.Owner()
 }
 
 // Get account balance
-func BalanceOf(ctx core.Context, owner core.Address) uint64 {
-	obj, err := ctx.GetObjectWithOwner(owner)
+func BalanceOf(owner core.Address) uint64 {
+	obj, err := core.GetObjectWithOwner(owner)
 	core.Assert(err)
 
 	var balance uint64
@@ -88,12 +88,12 @@ func BalanceOf(ctx core.Context, owner core.Address) uint64 {
 }
 
 // Transfer tokens to another address
-func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
-	from := ctx.Sender()
+func Transfer(to core.Address, amount uint64) bool {
+	from := core.Sender()
 
 	// Check amount validity
 	core.Assert(amount > 0)
-	obj, err := ctx.GetObjectWithOwner(from)
+	obj, err := core.GetObjectWithOwner(from)
 	core.Assert(err)
 
 	var fromBalance uint64
@@ -104,12 +104,12 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
 
 	core.Assert(obj.Set(TokenAmountKey, fromBalance-amount))
 
-	toObj := ctx.CreateObject()
+	toObj := core.CreateObject()
 	core.Assert(toObj.Set(TokenAmountKey, amount))
 	toObj.SetOwner(to)
 
 	// Log transfer event
-	ctx.Log("transfer",
+	core.Log("transfer",
 		"from", from,
 		"to", to,
 		"amount", amount)
@@ -118,8 +118,8 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) bool {
 }
 
 // Collect balances from multiple objects into one
-func Collect(ctx core.Context, ids []core.ObjectID) bool {
-	sender := ctx.Sender()
+func Collect(ids []core.ObjectID) bool {
+	sender := core.Sender()
 
 	// Check if ids is not empty
 	core.Assert(len(ids) > 1)
@@ -127,15 +127,15 @@ func Collect(ctx core.Context, ids []core.ObjectID) bool {
 	// Migrate balances from other objects to the first object
 	for i := 1; i < len(ids); i++ {
 		id := ids[i]
-		obj, err := ctx.GetObject(id)
+		obj, err := core.GetObject(id)
 		core.Assert(err)
 		core.Assert(obj.Owner() == sender)
 		var balance uint64
 		core.Assert(obj.Get(TokenAmountKey, &balance))
 		amount += balance
-		ctx.DeleteObject(id)
+		core.DeleteObject(id)
 	}
-	obj, err := ctx.GetObject(ids[0])
+	obj, err := core.GetObject(ids[0])
 	core.Assert(err)
 	core.Assert(obj.Owner() == sender)
 	core.Assert(obj.Set(TokenAmountKey, amount))
@@ -144,14 +144,14 @@ func Collect(ctx core.Context, ids []core.ObjectID) bool {
 }
 
 // Mint new tokens (owner only)
-func Mint(ctx core.Context, to core.Address, amount uint64) bool {
-	sender := ctx.Sender()
+func Mint(to core.Address, amount uint64) bool {
+	sender := core.Sender()
 
 	// Check amount validity
 	core.Assert(amount > 0)
 
 	// Get default Object
-	obj, err := ctx.GetObject(core.ZeroObjectID)
+	obj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 	core.Assert(obj.Owner() == sender)
 
@@ -162,12 +162,12 @@ func Mint(ctx core.Context, to core.Address, amount uint64) bool {
 	totalSupply += amount
 	core.Assert(obj.Set(TokenTotalSupplyKey, totalSupply))
 
-	toObj := ctx.CreateObject()
+	toObj := core.CreateObject()
 	core.Assert(toObj.Set(TokenAmountKey, amount))
 	toObj.SetOwner(to)
 
 	// Log mint event
-	ctx.Log("mint",
+	core.Log("mint",
 		"to", to,
 		"amount", amount,
 		"total_supply", totalSupply)
@@ -176,13 +176,13 @@ func Mint(ctx core.Context, to core.Address, amount uint64) bool {
 }
 
 // Burn tokens
-func Burn(ctx core.Context, id core.ObjectID, amount uint64) bool {
-	sender := ctx.Sender()
+func Burn(id core.ObjectID, amount uint64) bool {
+	sender := core.Sender()
 
 	core.Assert(amount > 0)
 
 	// Get default Object
-	obj, err := ctx.GetObject(core.ZeroObjectID)
+	obj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 	core.Assert(obj.Owner() == sender)
 
@@ -195,10 +195,10 @@ func Burn(ctx core.Context, id core.ObjectID, amount uint64) bool {
 
 	var userObj core.Object
 	if id == core.ZeroObjectID {
-		userObj, err = ctx.GetObjectWithOwner(sender)
+		userObj, err = core.GetObjectWithOwner(sender)
 		core.Assert(err)
 	} else {
-		userObj, err = ctx.GetObject(id)
+		userObj, err = core.GetObject(id)
 		core.Assert(err)
 	}
 
@@ -208,13 +208,13 @@ func Burn(ctx core.Context, id core.ObjectID, amount uint64) bool {
 
 	userBalance -= amount
 	if userBalance == 0 {
-		ctx.DeleteObject(userObj.ID())
+		core.DeleteObject(userObj.ID())
 	} else {
 		core.Assert(userObj.Set(TokenAmountKey, userBalance))
 	}
 
 	// Log burn event
-	ctx.Log("burn",
+	core.Log("burn",
 		"from", sender,
 		"amount", amount,
 		"total_supply", totalSupply)

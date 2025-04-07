@@ -1,8 +1,4 @@
-package testcontract
-
-import (
-	"github.com/govm-net/vm/core"
-)
+package testdata
 
 // Package-level function
 func GetVersion() string {
@@ -16,6 +12,6 @@ func Calculate(a int, b int) (int, error) {
 
 type TestContract struct{}
 
-func (c *TestContract) DoSomething(ctx core.Context) string {
+func (c *TestContract) DoSomething() string {
 	return "Something"
 }

@@ -1,43 +1,39 @@
-package testcontract
+package testdata
 
-import (
-	"github.com/govm-net/vm/core"
-)
-
-// User represents a user in the system
-type User struct {
+// User1 represents a user in the system
+type User1 struct {
 	Name  string
 	Age   int
 	Email string
 }
 
-// Order represents an order in the system
-type Order struct {
+// Order1 represents an order in the system
+type Order1 struct {
 	ID     string
 	Amount float64
 	Status string
 }
 
 // GetUserInfo returns user information with multiple values
-func GetUserInfo(ctx core.Context, id string) (string, int, error) {
+func GetUserInfo(id string) (string, int, error) {
 	// 模拟从数据库获取用户信息
 	return "John Doe", 30, nil
 }
 
 // CreateOrderWithDetails creates an order and returns multiple values
-func CreateOrderWithDetails(ctx core.Context, userID string, amount float64) (*Order, string, error) {
-	order := &Order{
+func CreateOrderWithDetails(userID string, amount float64) (*Order1, string, error) {
+	order := &Order1{
 		ID:     "order123",
 		Amount: amount,
 		Status: "created",
 	}
-	return order, "Order created successfully", nil
+	return order, "Order1 created successfully", nil
 }
 
 // ProcessUserAndOrder processes a user and creates an order
-func ProcessUserAndOrder(ctx core.Context, user *User) (*User, *Order, error) {
+func ProcessUserAndOrder(user *User1) (*User1, *Order1, error) {
 	// 模拟处理用户和创建订单
-	order := &Order{
+	order := &Order1{
 		ID:     "order456",
 		Amount: 100.0,
 		Status: "processed",

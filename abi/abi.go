@@ -29,7 +29,7 @@ type Function struct {
 	Outputs []Parameter `json:"outputs,omitempty"`
 }
 
-// Event represents a contract event (from core.Context.Log calls)
+// Event represents a contract event
 type Event struct {
 	Name       string      `json:"name,omitempty"`
 	Parameters []Parameter `json:"parameters,omitempty"`

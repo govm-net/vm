@@ -4,10 +4,6 @@
         {
             "name": "Initialize",
             "inputs": [
-                {
-                    "name": "ctx",
-                    "type": "core.Context"
-                }
             ],
             "outputs": [
                 {
@@ -19,10 +15,6 @@
         {
             "name": "Increment",
             "inputs": [
-                {
-                    "name": "ctx",
-                    "type": "core.Context"
-                },
                 {
                     "name": "value",
                     "type": "uint64"

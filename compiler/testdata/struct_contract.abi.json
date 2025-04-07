@@ -1,5 +1,5 @@
 {
-    "package_name": "testcontract",
+    "package_name": "testdata",
     "functions": [
         {
             "name": "ProcessUser",

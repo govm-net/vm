@@ -1,14 +1,12 @@
-package invalidcontract
+package testdata
 
 import (
 	"fmt"
-
-	"github.com/govm-net/vm/core"
 )
 
 type InvalidContract struct{}
 
-func (c *InvalidContract) DoSomething(ctx core.Context) string {
+func (c *InvalidContract) DoSomething() string {
 	fmt.Println("DoSomething")
 	return "Something"
 }

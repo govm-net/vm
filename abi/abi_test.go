@@ -41,8 +41,8 @@ func TestExtractABI(t *testing.T) {
 	}
 
 	// 验证包名
-	if abi.PackageName != "testcontract" {
-		t.Errorf("Expected package name 'testcontract', got '%s'", abi.PackageName)
+	if abi.PackageName != "testdata" {
+		t.Errorf("Expected package name 'testdata', got '%s'", abi.PackageName)
 	}
 
 	// 验证函数
@@ -62,8 +62,8 @@ func TestExtractABI(t *testing.T) {
 	}
 
 	// 验证包名
-	if abi.PackageName != "countercontract" {
-		t.Errorf("Expected package name 'countercontract', got '%s'", abi.PackageName)
+	if abi.PackageName != "testdata" {
+		t.Errorf("Expected package name 'testdata', got '%s'", abi.PackageName)
 	}
 
 	// 验证函数
@@ -231,11 +231,11 @@ type User struct {
 	Email string
 }
 
-func ProcessUser(ctx core.Context, user *User) error {
+func ProcessUser( user *User) error {
 	return nil
 }
 
-func CreateOrder(ctx core.Context, amount *big.Int) (*Order, error) {
+func CreateOrder( amount *big.Int) (*Order, error) {
 	return nil, nil
 }
 `)

@@ -13,23 +13,23 @@ const (
 // Initialize the contract
 // This function starts with a capital letter, so it will be automatically exported
 // and called when the contract is deployed
-func Initialize(ctx core.Context) int32 {
+func Initialize() int32 {
 	// Get the contract's default Object (empty ObjectID)
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
+	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
 	// Initialize counter value to 0
 	err = defaultObj.Set(CounterKey, uint64(0))
 	core.Assert(err)
 
-	ctx.Log("initialize", "contract_address", ctx.ContractAddress())
+	core.Log("initialize", "contract_address", core.ContractAddress())
 	return 0
 }
 
 // Increment the counter
-func Increment(ctx core.Context, value uint64) uint64 {
+func Increment(value uint64) uint64 {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
+	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
 	// Get current counter value
@@ -45,19 +45,19 @@ func Increment(ctx core.Context, value uint64) uint64 {
 	core.Assert(err)
 
 	// Log event
-	ctx.Log("increment",
+	core.Log("increment",
 		"from", currentValue,
 		"add", value,
 		"to", newValue,
-		"sender", ctx.Sender())
+		"sender", core.Sender())
 
 	return newValue
 }
 
 // GetCounter returns the current counter value
-func GetCounter(ctx core.Context) uint64 {
+func GetCounter() uint64 {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
+	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
 	// Get current counter value
@@ -69,9 +69,9 @@ func GetCounter(ctx core.Context) uint64 {
 }
 
 // Reset sets the counter value back to 0
-func Reset(ctx core.Context) {
+func Reset() {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ObjectID{})
+	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
 	// Reset counter value to 0
@@ -79,5 +79,5 @@ func Reset(ctx core.Context) {
 	core.Assert(err)
 
 	// Log event
-	ctx.Log("reset", "sender", ctx.Sender())
+	core.Log("reset", "sender", core.Sender())
 }

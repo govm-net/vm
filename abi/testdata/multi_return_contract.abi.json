@@ -1,13 +1,9 @@
 {
-    "package_name": "testcontract",
+    "package_name": "testdata",
     "functions": [
         {
             "name": "GetUserInfo",
             "inputs": [
-                {
-                    "name": "ctx",
-                    "type": "core.Context"
-                },
                 {
                     "name": "id",
                     "type": "string"
@@ -33,10 +29,6 @@
             "name": "CreateOrderWithDetails",
             "inputs": [
                 {
-                    "name": "ctx",
-                    "type": "core.Context"
-                },
-                {
                     "name": "userID",
                     "type": "string"
                 },
@@ -48,7 +40,7 @@
             "outputs": [
                 {
                     "name": "",
-                    "type": "*Order"
+                    "type": "*Order1"
                 },
                 {
                     "name": "",
@@ -65,22 +57,18 @@
             "name": "ProcessUserAndOrder",
             "inputs": [
                 {
-                    "name": "ctx",
-                    "type": "core.Context"
-                },
-                {
                     "name": "user",
-                    "type": "*User"
+                    "type": "*User1"
                 }
             ],
             "outputs": [
                 {
                     "name": "",
-                    "type": "*User"
+                    "type": "*User1"
                 },
                 {
                     "name": "",
-                    "type": "*Order"
+                    "type": "*Order1"
                 },
                 {
                     "name": "",

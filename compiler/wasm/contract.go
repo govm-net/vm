@@ -58,7 +58,7 @@ type Object struct {
 	id ObjectID
 }
 
-var _ core.Context = &Context{}
+var _ types.Context = &Context{}
 var _ core.Object = &Object{}
 
 // 从主机环境导入的函数 - 这些函数由主机环境提供
@@ -618,7 +618,7 @@ const (
 var lastErrorMessage string
 
 // 合约函数处理器类型
-type ContractFunctionHandler func(ctx core.Context, params []byte) (any, error)
+type ContractFunctionHandler func(params []byte) (any, error)
 
 // 合约函数处理表，将在初始化时填充
 var contractFunctions = map[string]ContractFunctionHandler{}
@@ -697,9 +697,10 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 	}
 
 	fmt.Println("handler, exists", handler, exists)
+	core.SetContext(ctx)
 
 	// 执行处理函数
-	data, err := handler(ctx, paramsBytes)
+	data, err := handler(paramsBytes)
 	if err != nil {
 		// 执行出错
 		errMsg := fmt.Sprintf("Execution error: %v", err)

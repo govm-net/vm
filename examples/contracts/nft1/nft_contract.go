@@ -17,9 +17,9 @@ const (
 )
 
 // Initialize NFT contract
-func InitializeNFT(ctx core.Context, name string, symbol string) core.ObjectID {
+func InitializeNFT(name string, symbol string) core.ObjectID {
 	// Get default Object (empty ObjectID)
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Store NFT basic information
@@ -29,22 +29,22 @@ func InitializeNFT(ctx core.Context, name string, symbol string) core.ObjectID {
 	// Initialize total supply as 0
 	core.Assert(defaultObj.Set(NFTTotalSupplyKey, uint64(0)))
 
-	defaultObj.SetOwner(ctx.Sender())
+	defaultObj.SetOwner(core.Sender())
 
 	// Log initialization event
-	ctx.Log("initialize",
+	core.Log("initialize",
 		"id", defaultObj.ID(),
 		"name", name,
 		"symbol", symbol,
-		"owner", ctx.Sender())
+		"owner", core.Sender())
 
 	return defaultObj.ID()
 }
 
 // Get NFT information
-func GetNFTInfo(ctx core.Context) (string, string, uint64) {
+func GetNFTInfo() (string, string, uint64) {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Read NFT basic information
@@ -61,27 +61,27 @@ func GetNFTInfo(ctx core.Context) (string, string, uint64) {
 }
 
 // Get contract owner
-func GetOwner(ctx core.Context) core.Address {
+func GetOwner() core.Address {
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	return defaultObj.Owner()
 }
 
 // Get NFT owner
-func OwnerOf(ctx core.Context, tokenId core.ObjectID) core.Address {
+func OwnerOf(tokenId core.ObjectID) core.Address {
 	// Get NFT object
-	nftObj, err := ctx.GetObject(tokenId)
+	nftObj, err := core.GetObject(tokenId)
 	core.Assert(err)
 
 	return nftObj.Owner()
 }
 
 // Get NFT URI
-func TokenURI(ctx core.Context, tokenId core.ObjectID) string {
+func TokenURI(tokenId core.ObjectID) string {
 	// Get NFT object
-	nftObj, err := ctx.GetObject(tokenId)
+	nftObj, err := core.GetObject(tokenId)
 	core.Assert(err)
 
 	var uri string
@@ -91,11 +91,11 @@ func TokenURI(ctx core.Context, tokenId core.ObjectID) string {
 }
 
 // Mint new NFT (owner only)
-func Mint(ctx core.Context, to core.Address, tokenURI string) core.ObjectID {
-	sender := ctx.Sender()
+func Mint(to core.Address, tokenURI string) core.ObjectID {
+	sender := core.Sender()
 
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Check if sender is contract owner
@@ -107,7 +107,7 @@ func Mint(ctx core.Context, to core.Address, tokenURI string) core.ObjectID {
 	totalSupply += 1
 
 	// Create new NFT object
-	nftObj := ctx.CreateObject()
+	nftObj := core.CreateObject()
 	core.Assert(nftObj.Set(NFTTokenURIKey, tokenURI))
 	core.Assert(nftObj.Set(NFTTokenIDKey, totalSupply))
 
@@ -118,7 +118,7 @@ func Mint(ctx core.Context, to core.Address, tokenURI string) core.ObjectID {
 	core.Assert(defaultObj.Set(NFTTotalSupplyKey, totalSupply))
 
 	// Log mint event
-	ctx.Log("mint",
+	core.Log("mint",
 		"to", to,
 		"token_id", totalSupply,
 		"token_uri", tokenURI)
@@ -127,11 +127,11 @@ func Mint(ctx core.Context, to core.Address, tokenURI string) core.ObjectID {
 }
 
 // Transfer NFT
-func Transfer(ctx core.Context, from core.Address, to core.Address, tokenId core.ObjectID) bool {
-	sender := ctx.Sender()
+func Transfer(from core.Address, to core.Address, tokenId core.ObjectID) bool {
+	sender := core.Sender()
 
 	// Get NFT object
-	nftObj, err := ctx.GetObject(tokenId)
+	nftObj, err := core.GetObject(tokenId)
 	core.Assert(err)
 
 	// Check if sender is NFT owner
@@ -144,7 +144,7 @@ func Transfer(ctx core.Context, from core.Address, to core.Address, tokenId core
 	nftObj.SetOwner(to)
 
 	// Log transfer event
-	ctx.Log("transfer",
+	core.Log("transfer",
 		"from", from,
 		"to", to,
 		"token_id", tokenId)
@@ -153,15 +153,15 @@ func Transfer(ctx core.Context, from core.Address, to core.Address, tokenId core
 }
 
 // Burn NFT
-func Burn(ctx core.Context, tokenId core.ObjectID) bool {
-	sender := ctx.Sender()
+func Burn(tokenId core.ObjectID) bool {
+	sender := core.Sender()
 
 	// Get default Object
-	defaultObj, err := ctx.GetObject(core.ZeroObjectID)
+	defaultObj, err := core.GetObject(core.ZeroObjectID)
 	core.Assert(err)
 
 	// Get NFT object
-	nftObj, err := ctx.GetObject(tokenId)
+	nftObj, err := core.GetObject(tokenId)
 	core.Assert(err)
 
 	// Check if sender is NFT owner
@@ -175,10 +175,10 @@ func Burn(ctx core.Context, tokenId core.ObjectID) bool {
 	core.Assert(defaultObj.Set(NFTTotalSupplyKey, totalSupply-1))
 
 	// Delete NFT object
-	ctx.DeleteObject(nftObj.ID())
+	core.DeleteObject(nftObj.ID())
 
 	// Log burn event
-	ctx.Log("burn",
+	core.Log("burn",
 		"from", sender,
 		"token_id", tokenId)
 

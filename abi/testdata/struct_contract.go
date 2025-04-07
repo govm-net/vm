@@ -1,4 +1,4 @@
-package testcontract
+package testdata
 
 type User struct {
 	Name string

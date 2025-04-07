@@ -11,18 +11,18 @@ import (
 // Initialize creates a new counter object with the specified initial value.
 // The caller becomes the owner of the counter object.
 // Returns the ObjectID of the created counter.
-func Initialize(ctx core.Context, initialValue uint64) core.ObjectID {
+func Initialize(initialValue uint64) core.ObjectID {
 	// Create a new counter object
-	counterObj := ctx.CreateObject()
+	counterObj := core.CreateObject()
 
 	// Set initial counter value
 	core.Assert(counterObj.Set("value", initialValue))
 
 	// Set object owner to contract creator
-	counterObj.SetOwner(ctx.Sender())
+	counterObj.SetOwner(core.Sender())
 
 	// Log initialization event
-	ctx.Log("CounterInitialized", "initial_value", initialValue, "creator", ctx.Sender())
+	core.Log("CounterInitialized", "initial_value", initialValue, "creator", core.Sender())
 
 	// Return counter object ID
 	return counterObj.ID()
@@ -30,9 +30,9 @@ func Initialize(ctx core.Context, initialValue uint64) core.ObjectID {
 
 // GetValue retrieves the current value of the specified counter.
 // This function can be called by any user.
-func GetValue(ctx core.Context, counterID core.ObjectID) uint64 {
+func GetValue(counterID core.ObjectID) uint64 {
 	// Get counter object
-	counterObj, err := ctx.GetObject(counterID)
+	counterObj, err := core.GetObject(counterID)
 	core.Assert(err)
 
 	// Get counter value
@@ -45,13 +45,13 @@ func GetValue(ctx core.Context, counterID core.ObjectID) uint64 {
 
 // Increment increases the counter value by the specified amount.
 // Only the owner of the counter object can call this function.
-func Increment(ctx core.Context, counterID core.ObjectID, amount uint64) error {
+func Increment(counterID core.ObjectID, amount uint64) error {
 	// Get counter object
-	counterObj, err := ctx.GetObject(counterID)
+	counterObj, err := core.GetObject(counterID)
 	core.Assert(err)
 
 	// Check if caller is the object owner
-	core.Assert(counterObj.Owner() != ctx.Sender())
+	core.Assert(counterObj.Owner() != core.Sender())
 
 	// Get current value
 	var currentValue uint64
@@ -63,26 +63,26 @@ func Increment(ctx core.Context, counterID core.ObjectID, amount uint64) error {
 	core.Assert(counterObj.Set("value", newValue))
 
 	// Log increment event
-	ctx.Log("CounterIncremented", "counter_id", counterID, "old_value", currentValue, "new_value", newValue, "amount", amount)
+	core.Log("CounterIncremented", "counter_id", counterID, "old_value", currentValue, "new_value", newValue, "amount", amount)
 
 	return nil
 }
 
 // Reset sets the counter value back to 0.
 // Only the owner of the counter object can call this function.
-func Reset(ctx core.Context, counterID core.ObjectID) error {
+func Reset(counterID core.ObjectID) error {
 	// Get counter object
-	counterObj, err := ctx.GetObject(counterID)
+	counterObj, err := core.GetObject(counterID)
 	core.Assert(err)
 
 	// Check if caller is the object owner
-	core.Assert(counterObj.Owner() != ctx.Sender())
+	core.Assert(counterObj.Owner() != core.Sender())
 
 	// Reset counter value to 0
 	core.Assert(counterObj.Set("value", uint64(0)))
 
 	// Log reset event
-	ctx.Log("CounterReset", "counter_id", counterID)
+	core.Log("CounterReset", "counter_id", counterID)
 
 	return nil
 }

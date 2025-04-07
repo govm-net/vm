@@ -1,12 +1,8 @@
-package restrictedcontract
+package testdata
 
-import (
-	"github.com/govm-net/vm/core"
-)
+type RestrictedContract1 struct{}
 
-type RestrictedContract struct{}
-
-func (c *RestrictedContract) DoSomething(ctx core.Context) string {
-	go func() {} // Using 'go' keyword is restricted
+func (c *RestrictedContract1) DoSomething() string {
+	go func() {}() // Using 'go' keyword is restricted
 	return "Something"
-} 
+}
