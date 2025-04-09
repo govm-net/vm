@@ -1,0 +1,37 @@
+{
+    "events": [
+        {
+            "name": "initialize",
+            "parameters": [
+                {
+                    "name": "contract_address"
+                }
+            ]
+        },
+        {
+            "name": "increment",
+            "parameters": [
+                {
+                    "name": "from"
+                },
+                {
+                    "name": "add"
+                },
+                {
+                    "name": "to"
+                },
+                {
+                    "name": "sender"
+                }
+            ]
+        },
+        {
+            "name": "reset",
+            "parameters": [
+                {
+                    "name": "sender"
+                }
+            ]
+        }
+    ]
+} 

@@ -1,0 +1,82 @@
+{
+    "package_name": "testdata",
+    "functions": [
+        {
+            "name": "GetUserInfo",
+            "inputs": [
+                {
+                    "name": "id",
+                    "type": "string"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "string"
+                },
+                {
+                    "name": "",
+                    "type": "int"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "CreateOrderWithDetails",
+            "inputs": [
+                {
+                    "name": "userID",
+                    "type": "string"
+                },
+                {
+                    "name": "amount",
+                    "type": "float64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "*Order1"
+                },
+                {
+                    "name": "",
+                    "type": "string"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        },
+        {
+            "name": "ProcessUserAndOrder",
+            "inputs": [
+                {
+                    "name": "user",
+                    "type": "*User1"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "*User1"
+                },
+                {
+                    "name": "",
+                    "type": "*Order1"
+                },
+                {
+                    "name": "",
+                    "type": "error"
+                }
+            ],
+            "is_exported": true
+        }
+    ],
+    "events": []
+} 

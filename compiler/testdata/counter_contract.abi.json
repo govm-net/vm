@@ -1,0 +1,56 @@
+{
+    "package": "countercontract",
+    "functions": [
+        {
+            "name": "Initialize",
+            "inputs": [
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "int32"
+                }
+            ]
+        },
+        {
+            "name": "Increment",
+            "inputs": [
+                {
+                    "name": "value",
+                    "type": "uint64"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "GetCounter",
+            "inputs": [
+                {
+                    "name": "ctx",
+                    "type": "core.Context"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "Reset",
+            "inputs": [
+                {
+                    "name": "ctx",
+                    "type": "core.Context"
+                }
+            ],
+            "outputs": []
+        }
+    ]
+} 
