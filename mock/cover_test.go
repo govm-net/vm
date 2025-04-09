@@ -24,9 +24,24 @@ func TestFunc(x int) int {
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.ConsumeGas(2)
+	mock.Enter("test", "TestFunc")
+	defer mock.Exit("test", "TestFunc")
+	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
 	y := x + 1
 	return y
+}
+
+var vm_cover_atomic_ = struct {
+	Count   [1]uint32
+	Pos     [3 * 1]uint32
+	NumStmt [1]uint16
+}{
+	Pos: [3 * 1]uint32{
+		3, 6, 0x2001a,
+	},
+	NumStmt: [1]uint16{
+		2,
+	},
 }
 `,
 		},
@@ -34,69 +49,120 @@ func TestFunc(x int) int {
 			name: "function with multiple statements",
 			input: `package test
 
-func TestFunc(x int) int {
-	a := x + 1
-	b := a * 2
-	return b
-}`,
+		func TestFunc(x int) int {
+			a := x + 1
+			b := a * 2
+			return b
+		}`,
 			expected: `package test
-
+            
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.ConsumeGas(3)
+	mock.Enter("test", "TestFunc")
+	defer mock.Exit("test", "TestFunc")
+	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
 	a := x + 1
 	b := a * 2
 	return b
 }
-`,
+
+var vm_cover_atomic_ = struct {
+	Count   [1]uint32
+	Pos     [3 * 1]uint32
+	NumStmt [1]uint16
+}{
+	Pos: [3 * 1]uint32{
+		3, 7, 0x4001c,
+	},
+	NumStmt: [1]uint16{
+		3,
+	},
+}
+		`,
 		},
 		{
 			name: "function with if statement",
 			input: `package test
 
-func TestFunc(x int) int {
-	if x > 0 {
-		return x
-	}
-	return -x
-}`,
+		func TestFunc(x int) int {
+			if x > 0 {
+				return x
+			}
+			return -x
+		}`,
 			expected: `package test
-
-import "github.com/govm-net/vm/mock"
-
-func TestFunc(x int) int {
-	mock.ConsumeGas(1)
-	if x > 0 {
-		mock.ConsumeGas(1)
-		return x
-	}
-	mock.ConsumeGas(1)
-	return -x
-}
-`,
+            
+            import "github.com/govm-net/vm/mock"
+            
+            func TestFunc(x int) int {
+            	mock.Enter("test", "TestFunc")
+            	defer mock.Exit("test", "TestFunc")
+            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+            	if x > 0 {
+            		mock.ConsumeGas(vm_cover_atomic_.NumStmt[2])
+            		return x
+            	}
+            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[1])
+            	return -x
+            }
+            
+            var vm_cover_atomic_ = struct {
+            	Count   [3]uint32
+            	Pos     [3 * 3]uint32
+            	NumStmt [3]uint16
+            }{
+            	Pos: [3 * 3]uint32{
+            		3, 4, 0xd001c,
+            		7, 7, 0xd0004,
+            		4, 6, 0x5000d,
+            	},
+            	NumStmt: [3]uint16{
+            		1,
+            		1,
+            		1,
+            	},
+            }
+		`,
 		},
 		{
 			name: "function with existing imports",
 			input: `package test
 
-import "fmt"
+		import "fmt"
 
-func TestFunc(x int) int {
-	fmt.Println(x)
-	return x
-}`,
+		func TestFunc(x int) int {
+			fmt.Println(x)
+			return x
+		}`,
 			expected: `package test
-
-import "github.com/govm-net/vm/mock"
-import "fmt"
-
-func TestFunc(x int) int {
-	mock.ConsumeGas(2) 
-	fmt.Println(x)
-	return x
-}
-`,
+            
+            import "github.com/govm-net/vm/mock"
+            
+            import "fmt"
+            
+            func TestFunc(x int) int {
+            	mock.Enter("test", "TestFunc")
+            	defer mock.Exit("test", "TestFunc")
+            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+            	fmt.Println(x)
+            	return x
+            }
+            
+            var vm_cover_atomic_ = struct {
+            	Count   [1]uint32
+            	Pos     [3 * 1]uint32
+            	NumStmt [1]uint16
+            }{
+            	Pos: [3 * 1]uint32{
+            		5, 8, 0x4001c,
+            	},
+            	NumStmt: [1]uint16{
+            		2,
+            	},
+            }
+            
+		`,
 		},
 	}
 

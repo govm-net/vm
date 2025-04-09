@@ -29,7 +29,7 @@ func TestValidateContract(t *testing.T) {
 	goKeywordContract, _ := testContracts.ReadFile("testdata/go_keyword_contract.go")
 	selectKeywordContract, _ := testContracts.ReadFile("testdata/select_keyword_contract.go")
 	noExportedFuncsContract, _ := testContracts.ReadFile("testdata/no_exported_funcs_contract.go")
-
+	invalidContract, _ := testContracts.ReadFile("testdata/invalid_contract.go")
 	// Contract that exceeds size limit
 	largeSizeContract := make([]byte, config.MaxCodeSize+1)
 
@@ -67,6 +67,12 @@ func TestValidateContract(t *testing.T) {
 	err = maker.ValidateContract(largeSizeContract)
 	if err == nil {
 		t.Errorf("Contract exceeding size limit should fail validation")
+	}
+
+	// Test invalid contract
+	err = maker.ValidateContract(invalidContract)
+	if err == nil {
+		t.Errorf("Invalid contract should fail validation")
 	}
 }
 

@@ -45,7 +45,21 @@ var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
 	if node == nil {
 		return nil
 	}
-	switch node.(type) {
+	switch n := node.(type) {
+	case *ast.EmptyStmt:
+		if n.Implicit {
+			return fmt.Errorf("restricted keyword ';' is not allowed")
+		}
+	case *ast.IfStmt:
+		// Check for semicolon in if statement initialization
+		if n.Init != nil {
+			return fmt.Errorf("semicolon in if statement initialization is not allowed")
+		}
+	case *ast.ForStmt:
+		// Check for semicolon in for statement initialization
+		if n.Init != nil {
+			return fmt.Errorf("semicolon in for statement initialization is not allowed")
+		}
 	case *ast.GoStmt:
 		return fmt.Errorf("restricted keyword 'go' is not allowed")
 	case *ast.SelectStmt:

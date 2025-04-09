@@ -31,7 +31,7 @@ func runExecute(contractAddr, funcName, argsJSON, sender, wasmDir string) error 
 	config := &vm.Config{
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: wasmDir,
-		CodeManagerDir:   ".code",
+		CodeManagerDir:   "code",
 		ContextType:      "db",
 	}
 

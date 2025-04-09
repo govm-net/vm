@@ -104,6 +104,17 @@ func (g *HandlerGenerator) GenerateHandlers() string {
 	}
 	sb.WriteString(")\n\n")
 
+	// import json/fmt, 避免在wasm中编译失败
+	sb.WriteString(`
+func init(){
+	if false{
+		fmt.Println("init")
+		json.Marshal(nil)
+	}
+}
+
+`)
+
 	// 为每个导出函数生成参数结构体和 handler
 	for _, fn := range g.abi.Functions {
 		sb.WriteString(g.generateParamStruct(fn))
@@ -178,9 +189,6 @@ func (g *HandlerGenerator) generateHandler(fn Function) string {
 		sb.WriteString("\t\t}\n")
 		sb.WriteString("\t}\n\n")
 	}
-
-	// 生成函数调用代码
-	sb.WriteString("\t// 调用原始函数\n")
 
 	// 检查是否需要返回值变量
 	hasReturnValue := len(fn.Outputs) > 0
