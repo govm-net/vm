@@ -115,7 +115,7 @@ func (ctx *defaultBlockchainContext) GetGas() int64 {
 }
 
 // Transfer 转账操作
-func (ctx *defaultBlockchainContext) Transfer(from, to types.Address, amount uint64) error {
+func (ctx *defaultBlockchainContext) Transfer(contract types.Address, from, to types.Address, amount uint64) error {
 	// 检查余额
 	fromBalance := ctx.balances[from]
 	if fromBalance < amount {

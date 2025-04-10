@@ -38,10 +38,17 @@ type ContractMetadata struct {
 
 // NewManager 创建代码管理器
 func NewManager(rootDir string) (*Manager, error) {
-	// 确保根目录存在
-	if err := os.MkdirAll(rootDir, 0755); err != nil {
-		slog.Error("failed to create root directory", "dir", rootDir, "error", err)
-		return nil, fmt.Errorf("failed to create root directory: %w", err)
+	if rootDir == "" {
+		tempDir, err := os.MkdirTemp("", "code-manager-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		}
+		rootDir = tempDir
+	} else {
+		if err := os.MkdirAll(rootDir, 0755); err != nil {
+			slog.Error("failed to create root directory", "dir", rootDir, "error", err)
+			return nil, fmt.Errorf("failed to create root directory: %w", err)
+		}
 	}
 
 	return &Manager{

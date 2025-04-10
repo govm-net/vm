@@ -270,7 +270,7 @@ func (c *Context) Balance(addr core.Address) uint64 {
 }
 
 // Transfer implements types.BlockchainContext
-func (c *Context) Transfer(from, to core.Address, amount uint64) error {
+func (c *Context) Transfer(contract core.Address, from, to core.Address, amount uint64) error {
 	return c.db.Transaction(func(tx *gorm.DB) error {
 		// Get sender balance
 		var fromBalance DBBalance

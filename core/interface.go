@@ -106,6 +106,15 @@ func Balance(addr Address) uint64 {
 	return ctx.Balance(addr)
 }
 
+// from sender to contract
+func Receive(amount uint64) error {
+	return ctx.Transfer(ctx.Sender(), ctx.ContractAddress(), amount)
+}
+
+func TransferTo(to Address, amount uint64) error {
+	return ctx.Transfer(ctx.ContractAddress(), to, amount)
+}
+
 // Object storage related - Basic state operations use panic instead of returning error
 func CreateObject() Object {
 	return ctx.CreateObject()

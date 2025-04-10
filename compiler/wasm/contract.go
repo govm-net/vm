@@ -270,12 +270,13 @@ func (c *Context) Balance(addr Address) uint64 {
 }
 
 // Transfer 从合约转账到指定地址
-func (c *Context) Transfer(to Address, amount uint64) error {
+func (c *Context) Transfer(from Address, to Address, amount uint64) error {
 	mock.ConsumeGas(500)
 	data := types.TransferParams{
-		From:   c.ContractAddress(),
-		To:     to,
-		Amount: amount,
+		Contract: c.ContractAddress(),
+		From:     from,
+		To:       to,
+		Amount:   amount,
 	}
 
 	buff, err := any2bytes(data)

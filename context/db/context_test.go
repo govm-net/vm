@@ -86,7 +86,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(0), ctx.Balance(addr2))
 
 	// 测试转账
-	err := ctx.Transfer(addr1, addr2, 500)
+	err := ctx.Transfer(core.ZeroAddress, addr1, addr2, 500)
 	require.NoError(t, err)
 
 	// 验证转账结果
@@ -94,7 +94,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(500), ctx.Balance(addr2))
 
 	// 测试余额不足
-	err = ctx.Transfer(addr1, addr2, 1000)
+	err = ctx.Transfer(core.ZeroAddress, addr1, addr2, 1000)
 	assert.Error(t, err)
 }
 

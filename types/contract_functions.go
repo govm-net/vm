@@ -100,9 +100,9 @@ type Context interface {
 	ContractAddress() Address // 获取当前合约地址
 
 	// 账户操作相关
-	Sender() Address                          // 获取交易发送者或调用合约
-	Balance(addr Address) uint64              // 获取账户余额
-	Transfer(to Address, amount uint64) error // 转账操作
+	Sender() Address                                // 获取交易发送者或调用合约
+	Balance(addr Address) uint64                    // 获取账户余额
+	Transfer(from, to Address, amount uint64) error // 转账操作
 
 	// 对象存储相关 - 基础状态操作使用panic而非返回error
 	CreateObject() Object                             // 创建新对象，失败时panic
@@ -130,9 +130,10 @@ type Object interface {
 }
 
 type TransferParams struct {
-	From   Address `json:"from,omitempty"`
-	To     Address `json:"to,omitempty"`
-	Amount uint64  `json:"amount,omitempty"`
+	Contract Address `json:"contract,omitempty"`
+	From     Address `json:"from,omitempty"`
+	To       Address `json:"to,omitempty"`
+	Amount   uint64  `json:"amount,omitempty"`
 }
 
 type CallParams struct {
@@ -216,9 +217,9 @@ type BlockchainContext interface {
 	SetGasLimit(limit int64)  // 设置gas限制
 	GetGas() int64            // 获取已使用gas
 	// 账户操作相关
-	Sender() Address                                // 获取交易发送者或调用合约
-	Balance(addr Address) uint64                    // 获取账户余额
-	Transfer(from, to Address, amount uint64) error // 转账操作
+	Sender() Address                                          // 获取交易发送者或调用合约
+	Balance(addr Address) uint64                              // 获取账户余额
+	Transfer(contract, from, to Address, amount uint64) error // 转账操作
 
 	// 对象存储相关 - 基础状态操作使用panic而非返回error
 	CreateObject(contract Address) (VMObject, error)                      // 创建新对象

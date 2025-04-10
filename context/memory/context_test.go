@@ -60,7 +60,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(0), ctx.Balance(addr2))
 
 	// Test transfer
-	err := ctx.Transfer(addr1, addr2, 500)
+	err := ctx.Transfer(core.ZeroAddress, addr1, addr2, 500)
 	require.NoError(t, err)
 
 	// Verify transfer result
@@ -68,7 +68,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(500), ctx.Balance(addr2))
 
 	// Test insufficient balance
-	err = ctx.Transfer(addr1, addr2, 1000)
+	err = ctx.Transfer(core.ZeroAddress, addr1, addr2, 1000)
 	assert.Error(t, err)
 }
 

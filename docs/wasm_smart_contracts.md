@@ -74,35 +74,45 @@ flowchart TD
 系统提供了一套统一的接口体系，主要包括：
 
 ```go
-// Context接口 - 提供访问区块链状态和功能的标准方法
-type Context interface {
-    // 区块链信息相关
-    BlockHeight() uint64         // 获取当前区块高度
-    BlockTime() int64            // 获取当前区块时间戳
-    ContractAddress() Address    // 获取当前合约地址
-    
-    // 账户操作相关
-    Sender() Address             // 获取交易发送者或调用合约
-    Balance(addr Address) uint64 // 获取账户余额
-    Transfer(to Address, amount uint64) error // 转账操作
-    
-    // 对象存储相关 - 基础状态操作使用panic而非返回error
-    CreateObject() Object                    // 创建新对象，失败时panic
-    GetObject(id ObjectID) (Object, error)   // 获取指定对象，可能返回error
-    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
-    DeleteObject(id ObjectID)                // 删除对象，失败时panic
-    
-    // 跨合约调用
-    Call(contract Address, function string, args ...any) ([]byte, error)
-    
-    // 日志与事件
-    Log(eventName string, keyValues ...interface{}) // 记录事件
-}
+// 核心包函数 - 提供访问区块链状态和功能的标准方法
+package core
+
+// 区块链信息相关
+func BlockHeight() uint64         // 获取当前区块高度
+func BlockTime() int64            // 获取当前区块时间戳
+func ContractAddress() Address    // 获取当前合约地址
+
+// 账户操作相关
+func Sender() Address             // 获取交易发送者或调用合约
+func Balance(addr Address) uint64 // 获取账户余额
+func Receive(amount uint64) error // 从发送者接收代币到合约
+func TransferTo(to Address, amount uint64) error // 从合约转账到指定地址
+
+// 对象存储相关 - 基础状态操作使用panic而非返回error
+func CreateObject() Object                    // 创建新对象，失败时panic
+func GetObject(id ObjectID) (Object, error)   // 获取指定对象，可能返回error
+func GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+func DeleteObject(id ObjectID)                // 删除对象，失败时panic
+
+// 跨合约调用
+func Call(contract Address, function string, args ...any) ([]byte, error)
+
+// 日志与事件
+func Log(eventName string, keyValues ...interface{}) // 记录事件
+
+// 辅助函数
+func Assert(condition any) // 断言条件为真，否则panic
+func Error(msg string) error // 创建错误
+func GetHash(data []byte) Hash // 计算数据哈希
+func IDFromString(str string) ObjectID // 从字符串创建对象ID
+func AddressFromString(str string) Address // 从字符串创建地址
+func HashFromString(str string) Hash // 从字符串创建哈希
 
 // Object接口 - 提供状态对象的操作方法
 type Object interface {
     ID() ObjectID           // 获取对象ID
     Owner() Address         // 获取对象所有者
+    Contract() Address      // 获取对象所属合约
     SetOwner(addr Address)  // 设置对象所有者，失败时panic
     
     // 字段操作
@@ -140,7 +150,7 @@ type Object interface {
 
 ```go
 // 导出函数示例 - 使用大写字母开头即可，无需//export标记
-func Transfer(ctx Context, to Address, amount uint64) error {
+func Transfer(to Address, amount uint64) error {
     // 函数实现...
 }
 
@@ -152,7 +162,7 @@ type TransferParams struct {
 }
 
 // 自动生成的方法处理器
-func handleTransfer(ctx Context, paramsJSON []byte) int32 {
+func handleTransfer(paramsJSON []byte) int32 {
     var params TransferParams
     if err := json.Unmarshal(paramsJSON, &params); err != nil {
         // 错误处理...
@@ -163,7 +173,7 @@ func handleTransfer(ctx Context, paramsJSON []byte) int32 {
     setCurrentCallInfo(params.CallInfo)
     
     // 调用实际函数
-    err := Transfer(ctx, params.To, params.Amount)
+    err := Transfer(params.To, params.Amount)
     
     // 处理返回值...
 }
@@ -217,6 +227,42 @@ func performTransfer(to Address, amount uint64) error {
 - 所有错误信息可通过 Context.Log 记录
 - 异常状态通过特定的返回值（通常为负数）表示
 
+### 3.6 Gas 计费机制
+
+系统采用双重计费策略，确保资源使用的公平性和可预测性：
+
+1. **基于代码行数的计费**：
+   - 每行代码执行消耗 1 gas
+   - 自动在编译时注入计费代码
+
+2. **基于接口调用的计费**：
+   - 不同接口操作有不同的 gas 消耗值
+   - 标准操作有固定的 gas 消耗
+
+```go
+// 标准 Gas 消耗值
+| 操作类型 | Gas 消耗 | 说明 |
+|---------|----------|------|
+| 代码行执行 | 1 | 每行代码基础消耗 |
+| Balance 查询 | 10 | 账户余额查询 |
+| Transfer 转账 | 20 | 代币转账操作 |
+| CreateObject | 30 | 创建新对象 |
+| GetObject | 10 | 获取对象 |
+| DeleteObject | 15 | 删除对象 |
+| Call 跨合约调用 | 50 | 基础调用消耗 |
+| Log 事件记录 | 5 | 记录事件 |
+```
+
+3. **特殊计费规则**：
+   - 跨合约调用：基础消耗 + 参数大小相关消耗
+   - 数据大小相关操作：基础消耗 + 数据大小相关消耗
+
+4. **Gas 控制 API**：
+   - 获取剩余 gas
+   - 预估操作消耗
+   - 检查是否有足够 gas
+   - 执行操作前消耗预估 gas
+
 ## 4. 版本与兼容性
 
 当前文档适用于 VM 项目 v1.0.0 版本。系统保持向后兼容，但以下方面可能存在版本差异：
@@ -252,6 +298,7 @@ func performTransfer(to Address, amount uint64) error {
 | 插桩 | 自动向合约代码中注入额外指令的过程，用于追踪调用链和增强功能 |
 | 调用链 | 跨合约调用的执行路径，记录从起始调用到当前执行点的所有合约和函数 |
 | 沙箱 | 隔离的执行环境，限制合约对外部资源的访问 |
+| Gas | 合约执行的计算资源单位，用于控制合约执行成本和防止资源滥用 |
 
 ## 8. 文档更新记录
 
@@ -259,7 +306,7 @@ func performTransfer(to Address, amount uint64) error {
 
 本文档系统进行了全面的标准化和一致性更新，主要包括：
 
-1. **统一Context和Object接口定义**：确保所有文档中接口签名一致，规范化核心接口的使用方式
+1. **统一包函数和Object接口定义**：确保所有文档中接口签名一致，规范化核心接口的使用方式
 2. **统一参数传递机制**：建立了基于Go RPC风格的统一参数传递模型，增强类型安全性
 3. **调用链追踪规范**：完善了跨合约调用中的调用链信息传递机制，增强安全审计能力
 4. **内存管理模型**：统一了内存分配和释放规范，明确了内存管理职责
@@ -275,19 +322,29 @@ func performTransfer(to Address, amount uint64) error {
 4. **参数序列化与反序列化**：完善了参数处理流程，确保类型信息得到保留，避免常见的JSON类型转换问题
 5. **编译时自动代码生成**：自动为导出函数生成包装代码、参数结构体和结果处理逻辑，减少重复编码工作
 
+### 2024年1月更新
+
+进一步完善了WebAssembly智能合约系统，主要改进：
+
+1. **Gas计费机制优化**：实现了双重计费策略，包括基于代码行数和基于接口调用的计费
+2. **调用链追踪增强**：优化了mock模块的实现，提供了更精确的调用者识别和调用链追踪
+3. **参数处理机制完善**：增强了复杂结构体参数的处理能力，支持嵌套结构和类型安全
+4. **性能优化**：引入了多项性能优化策略，包括缓冲区复用、类型缓存和延迟反序列化
+5. **错误处理统一**：规范化了错误处理模式，区分基础状态操作和业务逻辑错误
+
 这些更新使WebAssembly智能合约系统更加易用、安全和高效，让开发者能够专注于业务逻辑实现，而不必过多关注底层调用细节。
 
-## 4. 参数处理机制
+## 9. 参数处理机制
 
 通过统一的参数处理机制，VM系统确保了跨合约调用的类型安全和调用链信息传递。
 
-### 4.1 参数序列化过程
+### 9.1 参数序列化过程
 
 在合约调用过程中，系统会自动处理参数序列化：
 
 ```go
 // 调用示例
-ctx.Call(tokenContractAddr, "Transfer", toAddress, amount)
+core.Call(tokenContractAddr, "Transfer", toAddress, amount)
 ```
 
 系统自动执行以下步骤：
@@ -315,7 +372,7 @@ ctx.Call(tokenContractAddr, "Transfer", toAddress, amount)
    - 使用JSON进行序列化，保留完整类型信息
    - 支持各种复杂类型，包括自定义结构体和嵌套结构
 
-### 4.2 参数反序列化过程
+### 9.2 参数反序列化过程
 
 目标合约接收到请求后，系统自动完成参数反序列化：
 
@@ -353,7 +410,7 @@ func handleTransfer(paramsJSON []byte) int32 {
    - 严格按照函数签名进行类型匹配
    - 避免JSON反序列化中常见的类型问题（如将数字默认转为float64）
 
-### 4.3 自定义结构体参数处理
+### 9.3 自定义结构体参数处理
 
 系统能够完整支持自定义结构体作为参数：
 
@@ -385,7 +442,7 @@ func TransferToken(transfer TokenTransfer) error {
    - 支持结构体标签中的验证规则
    - 可设置字段默认值和必填检查
 
-### 4.4 性能优化
+### 9.4 性能优化
 
 参数处理机制包含多项性能优化：
 

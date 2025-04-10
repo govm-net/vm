@@ -66,8 +66,8 @@ func handle_contract_call(funcNamePtr, funcNameLen, paramsPtr, paramsLen int32) 
 
 ```go
 // 公开函数 - 自动导出
-func Hello(ctx core.Context) int32 {
-    ctx.Log("hello", "world")
+func Hello() int32 {
+    core.Log("hello", "world")
     return 1
 }
 
@@ -78,7 +78,7 @@ func ProcessData(dataPtr int32, dataLen int32) int32 {
 }
 
 // 公开函数 - 自动导出
-func TransferToken(ctx core.Context, toPtr int32, amount int64) int32 {
+func TransferToken(to core.Address, amount int64) int32 {
     // 转账示例函数
     // ...
 }
@@ -166,7 +166,7 @@ type Context interface {
     // 账户操作相关
     Sender() Address             // 获取交易发送者或调用合约
     Balance(addr Address) uint64 // 获取账户余额
-    Transfer(to Address, amount uint64) error // 转账操作
+    Transfer(from, to Address, amount uint64) error // 转账操作
     
     // 对象存储相关 - 基础状态操作使用panic而非返回error
     CreateObject() Object                     // 创建新对象，失败时panic
@@ -180,94 +180,67 @@ type Context interface {
     // 日志与事件
     Log(eventName string, keyValues ...interface{}) // 记录事件
 }
+```
 
-// Context 实现
-func (c *Context) BlockHeight() uint64 {
-    return get_block_height()
+在合约代码中，开发者可以通过 `core` 包提供的全局函数访问这些功能：
+
+```go
+// 区块链信息相关
+func BlockHeight() uint64 {
+    return ctx.BlockHeight()
 }
 
-func (c *Context) BlockTime() int64 {
-    return get_block_time()
+func BlockTime() int64 {
+    return ctx.BlockTime()
 }
 
-func (c *Context) ContractAddress() Address {
-    // 获取当前合约地址
-    ptr, size, _ := callHost(FuncGetContractAddress, nil)
-    data := readMemory(ptr, size)
-    var addr Address
-    copy(addr[:], data)
-    return addr
+func ContractAddress() Address {
+    return ctx.ContractAddress()
 }
 
-func (c *Context) Sender() Address {
-    // 获取交易发送者或调用合约
-    // 在跨合约调用中，返回调用者合约地址
-    // 在外部交易中，返回交易发起者地址
-    ptr, size, _ := callHost(FuncGetSender, nil)
-    data := readMemory(ptr, size)
-    var addr Address
-    copy(addr[:], data)
-    return addr
+// 账户操作相关
+func Sender() Address {
+    return ctx.Sender()
 }
 
-func (c *Context) Balance(addr Address) uint64 {
-    // 获取账户余额
-    data, err := writeToMemory(addr)
-    if err != nil {
-        return 0
-    }
-    
-    ptr, _, _ := callHost(FuncGetBalance, data)
-    return get_balance(ptr)
+func Balance(addr Address) uint64 {
+    return ctx.Balance(addr)
 }
 
-func (c *Context) Transfer(to Address, amount uint64) error {
-    // 转账操作
-    transferData := struct {
-        To     Address
-        Amount uint64
-    }{
-        To:     to,
-        Amount: amount,
-    }
-    
-    data, err := writeToMemory(transferData)
-    if err != nil {
-        return err
-    }
-    
-    _, _, errCode := callHost(FuncTransfer, data)
-    if errCode != 0 {
-        return fmt.Errorf("transfer failed with code: %d", errCode)
-    }
-    
-    return nil
+// 转账操作
+func Receive(amount uint64) error {
+    return ctx.Transfer(ctx.Sender(), ctx.ContractAddress(), amount)
 }
 
-func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
-    // 跨合约调用
-    // 将在编译时自动注入调用链信息
-    callData := struct {
-        Contract Address
-        Function string
-        Args     []any
-    }{
-        Contract: contract,
-        Function: function,
-        Args:     args,
-    }
-    
-    data, err := writeToMemory(callData)
-    if err != nil {
-        return nil, err
-    }
-    
-    ptr, size, errCode := callHost(FuncCall, data)
-    if errCode != 0 {
-        return nil, fmt.Errorf("call failed with code: %d", errCode)
-    }
-    
-    return readMemory(ptr, size), nil
+func TransferTo(to Address, amount uint64) error {
+    return ctx.Transfer(ctx.ContractAddress(), to, amount)
+}
+
+// 对象存储相关
+func CreateObject() Object {
+    return ctx.CreateObject()
+}
+
+func GetObject(id ObjectID) (Object, error) {
+    return ctx.GetObject(id)
+}
+
+func GetObjectWithOwner(owner Address) (Object, error) {
+    return ctx.GetObjectWithOwner(owner)
+}
+
+func DeleteObject(id ObjectID) {
+    ctx.DeleteObject(id)
+}
+
+// 跨合约调用
+func Call(contract Address, function string, args ...any) ([]byte, error) {
+    return ctx.Call(contract, function, args...)
+}
+
+// 日志与事件
+func Log(eventName string, keyValues ...interface{}) {
+    ctx.Log(eventName, keyValues...)
 }
 ```
 
@@ -280,130 +253,106 @@ Object 接口提供统一的对象状态管理能力：
 type Object interface {
     // 元数据方法
     ID() ObjectID                    // 获取对象唯一ID
-    Contract() Address               // 获取所属合约地址
     Owner() Address                  // 获取所有者地址
-    SetOwner(owner Address) error    // 设置所有者地址
+    Contract() Address               // 获取所属合约地址
+    SetOwner(addr Address)           // 设置所有者地址，失败时panic
     
     // 状态访问方法
     Get(field string, value any) error    // 获取指定字段值
     Set(field string, value any) error    // 设置指定字段值
 }
-
-// Object 实现
-func (o *Object) ID() ObjectID {
-    return o.id
-}
-
-func (o *Object) Contract() Address {
-    ptr, size, _ := callHost(FuncGetObjectContract, o.id[:])
-    data := readMemory(ptr, size)
-    var addr Address
-    copy(addr[:], data)
-    return addr
-}
-
-func (o *Object) Owner() Address {
-    ptr, size, _ := callHost(FuncGetObjectOwner, o.id[:])
-    data := readMemory(ptr, size)
-    var addr Address
-    copy(addr[:], data)
-    return addr
-}
-
-func (o *Object) SetOwner(owner Address) error {
-    setOwnerData := struct {
-        ID    ObjectID
-        Owner Address
-    }{
-        ID:    o.id,
-        Owner: owner,
-    }
-    
-    data, err := writeToMemory(setOwnerData)
-    if err != nil {
-        return err
-    }
-    
-    _, _, errCode := callHost(FuncSetObjectOwner, data)
-    if errCode != 0 {
-        return fmt.Errorf("set owner failed with code: %d", errCode)
-    }
-    
-    return nil
-}
-
-func (o *Object) Get(field string, value any) error {
-    // 获取字段值
-    request := struct {
-        ID    ObjectID
-        Field string
-    }{
-        ID:    o.id,
-        Field: field,
-    }
-    
-    data, err := writeToMemory(getData)
-    if err != nil {
-        return err
-    }
-    
-    ptr, size, errCode := callHost(FuncGetObjectField, data)
-    if errCode != 0 {
-        return fmt.Errorf("get field failed with code: %d", errCode)
-    }
-    
-    fieldData := readMemory(ptr, size)
-    return json.Unmarshal(fieldData, value)
-}
-
-func (o *Object) Set(field string, value any) error {
-    // 设置对象字段值
-    setData := struct {
-        ID    ObjectID
-        Field string
-        Value any
-    }{
-        ID:    o.id,
-        Field: field,
-        Value: value,
-    }
-    
-    data, err := writeToMemory(setData)
-    if err != nil {
-        return err
-    }
-    
-    _, _, errCode := callHost(FuncSetObjectField, data)
-    if errCode != 0 {
-        return fmt.Errorf("set field failed with code: %d", errCode)
-    }
-    
-    return nil
-}
 ```
 
 ## 3. 主机侧接口详解
 
-主机侧接口在 host/main.go 中实现，负责处理合约的请求并提供资源控制。
+主机侧接口在 host/runner.go 中实现，负责处理合约的请求并提供资源控制。
 
 ### 3.1 状态管理
 
 主机环境维护一个包含区块链状态的结构：
 
 ```go
-// Host state
-type HostState struct {
-    CurrentSender   Address
-    CurrentBlock    uint64
-    CurrentTime     int64
-    ContractAddress Address
-    Balances        map[Address]uint64
-    Objects         map[ObjectID]Object
-    ObjectsByOwner  map[Address][]ObjectID
+// defaultBlockchainContext 实现了默认的区块链上下文
+type defaultBlockchainContext struct {
+    // 区块信息
+    blockHeight uint64
+    blockTime   int64
+
+    // 账户余额
+    balances map[types.Address]uint64
+
+    // 虚拟机对象存储
+    objects        map[core.ObjectID]map[string][]byte
+    objectOwner    map[core.ObjectID]core.Address
+    objectContract map[core.ObjectID]core.Address
+
+    // 当前执行上下文
+    contractAddr types.Address
+    sender       types.Address
+    txHash       core.Hash
+    nonce        uint64
+    gasLimit     int64
 }
 ```
 
-### 3.2 导入函数实现
+### 3.2 BlockchainContext 接口
+
+主机环境实现了 BlockchainContext 接口，提供更丰富的区块链状态管理功能：
+
+```go
+// BlockchainContext 接口定义
+type BlockchainContext interface {
+    // 设置区块和交易信息
+    SetBlockInfo(height uint64, time int64, hash Hash) error
+    SetTransactionInfo(hash Hash, from Address, to Address, value uint64) error
+    
+    // 区块链信息相关
+    BlockHeight() uint64      // 获取当前区块高度
+    BlockTime() int64         // 获取当前区块时间戳
+    ContractAddress() Address // 获取当前合约地址
+    TransactionHash() Hash    // 获取当前交易哈希
+    SetGasLimit(limit int64)  // 设置gas限制
+    GetGas() int64            // 获取已使用gas
+    
+    // 账户操作相关
+    Sender() Address                                          // 获取交易发送者或调用合约
+    Balance(addr Address) uint64                              // 获取账户余额
+    Transfer(contract, from, to Address, amount uint64) error // 转账操作
+
+    // 对象存储相关
+    CreateObject(contract Address) (VMObject, error)                      // 创建新对象
+    CreateObjectWithID(contract Address, id ObjectID) (VMObject, error)   // 创建新对象
+    GetObject(contract Address, id ObjectID) (VMObject, error)            // 获取指定对象
+    GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // 按所有者获取对象
+    DeleteObject(contract Address, id ObjectID) error                     // 删除对象
+
+    // 跨合约调用
+    Call(caller Address, contract Address, function string, args ...any) ([]byte, error)
+
+    // 日志与事件
+    Log(contract Address, eventName string, keyValues ...any) // 记录事件
+}
+```
+
+### 3.3 VMObject 接口
+
+主机环境还实现了 VMObject 接口，提供对象状态管理功能：
+
+```go
+// VMObject 接口定义
+type VMObject interface {
+    ID() ObjectID                                  // 获取对象ID
+    Owner() Address                                // 获取对象所有者
+    Contract() Address                             // 获取对象所属合约
+    SetOwner(contract, sender, addr Address) error // 设置对象所有者
+
+    // 字段操作
+    Get(contract Address, field string) ([]byte, error)             // 获取字段值
+    Set(contract, sender Address, field string, value []byte) error // 设置字段值
+}
+```
+
+### 3.4 导入函数实现
 
 主机环境为合约提供两种主要的导入函数处理器：
 
@@ -476,6 +425,127 @@ sequenceDiagram
 - 通过缓冲区返回详细错误信息
 - 主机函数检查参数有效性和内存安全
 
+### 4.3 函数ID常量
+
+系统使用预定义的函数ID常量来标识不同的操作：
+
+```go
+// WasmFunctionID 定义了主机与合约通信中使用的函数ID常量
+type WasmFunctionID int32
+
+const (
+    // FuncGetSender 返回当前交易的发送者地址
+    FuncGetSender WasmFunctionID = iota + 1 // 1
+    // FuncGetContractAddress 返回当前合约地址
+    FuncGetContractAddress // 2
+    // FuncTransfer 从合约向接收者转移代币
+    FuncTransfer // 3
+    // FuncCreateObject 创建新的状态对象
+    FuncCreateObject // 4
+    // FuncCall 调用另一个合约的函数
+    FuncCall // 5
+    // FuncGetObject 通过ID获取状态对象
+    FuncGetObject // 6
+    // FuncGetObjectWithOwner 获取特定地址拥有的对象
+    FuncGetObjectWithOwner // 7
+    // FuncDeleteObject 移除状态对象
+    FuncDeleteObject // 8
+    // FuncLog 向区块链的事件系统记录消息
+    FuncLog // 9
+    // FuncGetObjectOwner 获取状态对象的所有者
+    FuncGetObjectOwner // 10
+    // FuncSetObjectOwner 更改状态对象的所有者
+    FuncSetObjectOwner // 11
+    // FuncGetObjectField 从状态对象获取特定字段
+    FuncGetObjectField // 12
+    // FuncSetObjectField 更新状态对象中的特定字段
+    FuncSetObjectField // 13
+    // FuncGetObjectContract 获取状态对象的合约
+    FuncGetObjectContract // 14
+)
+```
+
+### 4.4 参数结构体
+
+系统使用预定义的结构体来传递复杂参数：
+
+```go
+// TransferParams 转账参数
+type TransferParams struct {
+    Contract Address `json:"contract,omitempty"`
+    From     Address `json:"from,omitempty"`
+    To       Address `json:"to,omitempty"`
+    Amount   uint64  `json:"amount,omitempty"`
+}
+
+// CallParams 合约调用参数
+type CallParams struct {
+    Caller   Address `json:"caller,omitempty"`
+    Contract Address `json:"contract,omitempty"`
+    Function string  `json:"function,omitempty"`
+    Args     []any   `json:"args,omitempty"`
+    GasLimit int64   `json:"gas_limit,omitempty"`
+}
+
+// GetObjectParams 获取对象参数
+type GetObjectParams struct {
+    Contract Address  `json:"contract,omitempty"`
+    ID       ObjectID `json:"id,omitempty"`
+}
+
+// GetObjectWithOwnerParams 按所有者获取对象参数
+type GetObjectWithOwnerParams struct {
+    Contract Address `json:"contract,omitempty"`
+    Owner    Address `json:"owner,omitempty"`
+}
+
+// GetObjectFieldParams 获取对象字段参数
+type GetObjectFieldParams struct {
+    Contract Address  `json:"contract,omitempty"`
+    ID       ObjectID `json:"id,omitempty"`
+    Field    string   `json:"field,omitempty"`
+}
+
+// DeleteObjectParams 删除对象参数
+type DeleteObjectParams struct {
+    Contract Address  `json:"contract,omitempty"`
+    ID       ObjectID `json:"id,omitempty"`
+}
+
+// SetOwnerParams 设置所有者参数
+type SetOwnerParams struct {
+    Contract Address  `json:"contract,omitempty"`
+    Sender   Address  `json:"sender,omitempty"`
+    ID       ObjectID `json:"id,omitempty"`
+    Owner    Address  `json:"owner,omitempty"`
+}
+
+// SetObjectFieldParams 设置对象字段参数
+type SetObjectFieldParams struct {
+    Contract Address  `json:"contract,omitempty"`
+    Sender   Address  `json:"sender,omitempty"`
+    ID       ObjectID `json:"id,omitempty"`
+    Field    string   `json:"field,omitempty"`
+    Value    any      `json:"value,omitempty"`
+}
+
+// LogParams 日志参数
+type LogParams struct {
+    Contract  Address `json:"contract,omitempty"`
+    Event     string  `json:"event,omitempty"`
+    KeyValues []any   `json:"key_values,omitempty"`
+}
+
+// HandleContractCallParams 处理合约调用参数
+type HandleContractCallParams struct {
+    Contract Address `json:"contract,omitempty"`
+    Sender   Address `json:"sender,omitempty"`
+    Function string  `json:"function,omitempty"`
+    Args     []byte  `json:"args,omitempty"`
+    GasLimit int64   `json:"gas_limit,omitempty"`
+}
+```
+
 ## 5. Gas计费机制
 
 WebAssembly智能合约使用精确的Gas计费机制来控制资源消耗，确保合约执行的安全和可预测性。
@@ -490,17 +560,17 @@ Gas计费系统采用双重计费策略：
 
 ```go
 // 原始合约代码
-func TransferToken(ctx core.Context, to Address, amount uint64) error {
+func TransferToken(to Address, amount uint64) error {
     if amount <= 0 {
         return errors.New("amount must be positive")
     }
     
-    sender := ctx.Sender()
-    return ctx.Transfer(to, amount)
+    sender := core.Sender()
+    return core.TransferTo(to, amount)
 }
 
 // 注入Gas计费后的代码
-func TransferToken(ctx core.Context, to Address, amount uint64) error {
+func TransferToken(to Address, amount uint64) error {
     mock.ConsumeGas(1)  // 消耗当前语句的gas
     if amount <= 0 {
         mock.ConsumeGas(1)  // if块内的语句消耗
@@ -508,8 +578,8 @@ func TransferToken(ctx core.Context, to Address, amount uint64) error {
     }
     
     mock.ConsumeGas(2)  // 后续两行代码消耗
-    sender := ctx.Sender()
-    return ctx.Transfer(to, amount)
+    sender := core.Sender()
+    return core.TransferTo(to, amount)
 }
 ```
 
@@ -526,7 +596,7 @@ func (c *Context) Sender() Address {
     // ... 实际逻辑 ...
 }
 
-func (c *Context) Transfer(to Address, amount uint64) error {
+func (c *Context) Transfer(from, to Address, amount uint64) error {
     mock.ConsumeGas(500)  // Transfer操作固定消耗500 gas
     // ... 实际逻辑 ...
 }
@@ -553,7 +623,7 @@ Context和Object接口的标准Gas消耗值：
 | | BlockTime() | 10 gas |
 | | ContractAddress() | 10 gas |
 | | Balance(addr) | 50 gas |
-| | Transfer(to, amount) | 500 gas |
+| | Transfer(from, to, amount) | 500 gas |
 | | Call(contract, function, args...) | 10000 gas + 被调用合约消耗 |
 | | CreateObject() | 50 gas |
 | | GetObject(id) | 50 gas |
@@ -563,7 +633,7 @@ Context和Object接口的标准Gas消耗值：
 | **Object** | ID() | 10 gas |
 | | Contract() | 100 gas |
 | | Owner() | 100 gas |
-| | SetOwner(owner) | 500 gas |
+| | SetOwner(addr) | 500 gas |
 | | Get(field, value) | 100 gas + 结果数据大小 |
 | | Set(field, value) | 1000 gas + 数据大小 * 100 gas |
 

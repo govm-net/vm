@@ -94,113 +94,123 @@ VM 系统架构采用分层设计，每一层都有明确的职责和接口：
 
 ```
 /
+├── abi/                        # ABI处理系统
+│   ├── abi.go                  # ABI定义和解析
+│   ├── abi_handler.go          # ABI处理逻辑
+│   ├── abi_test.go             # ABI测试
+│   └── testdata/               # 测试数据
+│
+├── api/                        # API接口定义（面向平台集成者）
+│   └── vm.go                   # VM系统API接口
+│
 ├── cmd/                        # 命令行工具
-│   ├── vm-cli/                 # VM管理命令行工具
-│   └── contract-compiler/      # 合约编译工具
+│   └── vm-cli/                 # VM管理命令行工具
+│       ├── deploy.go           # 合约部署命令
+│       ├── execute.go          # 合约执行命令
+│       └── main.go             # 主程序入口
+│
+├── compiler/                   # 合约编译系统
+│   ├── maker.go                # 合约编译核心逻辑
+│   ├── maker_test.go           # 编译测试
+│   ├── testdata/               # 测试数据
+│   └── wasm/                   # WebAssembly相关工具
+│
+├── context/                    # 上下文管理系统
+│   ├── db/                     # 数据库上下文实现
+│   ├── memory/                 # 内存上下文实现
+│   └── registry.go             # 上下文注册机制
 │
 ├── core/                       # 核心接口定义（面向合约开发者）
 │   └── interface.go            # 合约所需的核心接口定义(Context, Object)
 │
-├── types/                      # 基础类型定义（内部使用）
-│   ├── common.go               # 通用类型定义
-│   └── errors.go               # 错误类型定义
+├── examples/                   # 示例合约
+│   └── contracts/              # 合约示例
+│       ├── counter/            # 计数器示例
+│       ├── counter_factory/    # 工厂模式示例
+│       ├── nft1/               # NFT合约示例
+│       ├── token1/             # 代币合约示例
+│       └── token2/             # 高级代币合约示例
 │
-├── api/                        # API接口定义（面向平台集成者）
-│   ├── system_api.go           # 系统API接口
-│   └── config.go               # 配置接口
+├── mock/                       # 测试和模拟工具
+│   ├── cover.go                # 代码覆盖率工具
+│   ├── edit.go                 # 代码编辑工具
+│   ├── gas.go                  # Gas消耗模拟
+│   └── mock.go                 # 通用模拟工具
 │
-├── compiler/                   # 合约编译系统
-│   ├── validator.go            # 源码验证
-│   ├── tinygo.go               # TinyGo编译集成
-│   ├── wasm_optimizer.go       # WASM优化工具
-│   └── wrapper_generator.go    # WASI包装代码生成
+├── repository/                 # 合约仓库管理
+│   ├── manager.go              # 仓库管理器
+│   └── manager_test.go         # 仓库管理测试
+│
+├── types/                      # 基础类型定义
+│   └── contract_functions.go   # 合约函数类型定义
 │
 ├── vm/                         # 虚拟机实现
 │   ├── engine.go               # VM引擎主实现
-│   └── execution_context.go    # 执行上下文实现
+│   ├── engine_test.go          # 引擎测试
+│   └── testdata/               # 测试数据
 │
-├── state/                      # 状态管理系统
-│   ├── object.go               # 对象接口实现
-│   ├── db_object.go            # 数据库对象实现
-│   ├── memory_object.go        # 内存对象实现
-│   └── state_manager.go        # 状态管理器
-│
-├── wasi/                       # WebAssembly系统接口
-│   ├── wasm_engine.go          # WebAssembly执行引擎
-│   ├── env.go                  # WASI环境变量
-│   ├── filesystem.go           # 文件系统接口
-│   ├── memory.go               # 内存管理
-│   └── imports.go              # 导入函数实现
-│
-├── security/                   # 安全系统
-│   ├── call_tracer.go          # 调用链追踪
-│   ├── permissions.go          # 权限控制
-│   └── resource_limiter.go     # 资源限制器
-│
-├── utils/                      # 工具库
-│   ├── serialization.go        # 参数序列化
-│   ├── wasm_utils.go           # WASM辅助工具
-│   └── crypto.go               # 加密工具
-│
-└── examples/                   # 示例合约
-    ├── token/                  # 代币合约
-    ├── counter/                # 计数器示例
-    └── nft/                    # NFT合约示例
+└── wasi/                       # WebAssembly系统接口
+    ├── wazero_engine.go        # wazero执行引擎
+    └── wazero_engine_test.go   # 引擎测试
 ```
 
 ## 3. 核心组件详解
 
 ### 3.1 合约接口系统
 
-VM系统提供了精简的接口系统，仅暴露合约开发者需要的核心接口，隐藏内部实现细节：
+VM系统提供了精简的接口系统，采用包函数方式暴露合约开发者需要的核心功能，避免Context被恶意伪造的情况：
 
 #### 3.1.1 核心接口设计理念
 
-对合约开发者而言，VM系统采取了"最小接口表面积"原则，只在`core/interface.go`中暴露必要的两个接口：
+对合约开发者而言，VM系统采取了"最小接口表面积"原则，只在`core`包中暴露必要的函数：
 
-1. **Context接口**：为合约提供与区块链环境交互的能力
+1. **包函数**：所有与区块链环境交互的功能都通过包函数提供，而不是通过接口
 2. **Object接口**：为合约提供操作状态对象的能力
 
-这种设计大大简化了合约开发者的学习曲线，使他们能够专注于业务逻辑而不是系统细节。开发者只需导入单一的`github.com/govm-net/vm/core`包，即可获得编写合约所需的全部接口定义。系统的所有复杂性都被封装在这两个简洁的接口背后，使得合约开发变得简单直观。
+这种设计大大简化了合约开发者的学习曲线，使他们能够专注于业务逻辑而不是系统细节。开发者只需导入单一的`github.com/govm-net/vm/core`包，即可获得编写合约所需的全部功能。系统的所有复杂性都被封装在这些简洁的函数背后，使得合约开发变得简单直观。
 
 ```go
 import "github.com/govm-net/vm/core"
 
-// 在合约中使用Context和Object接口
-func MyContractFunction(ctx core.Context, param string) (core.ObjectID, error) {
-    // 使用Context和Object接口完成合约逻辑
+// 在合约中使用包函数
+func MyContractFunction(param string) (core.ObjectID, error) {
+    // 使用包函数完成合约逻辑
 }
 ```
 
-#### 3.1.2 Context接口
+#### 3.1.2 包函数系统
 
-Context是合约与区块链环境交互的主要接口：
+包函数是合约与区块链环境交互的主要方式：
 
 ```go
-// Context 接口定义
-type Context interface {
-    // 区块链信息相关
-    BlockHeight() uint64          // 获取当前区块高度
-    BlockTime() int64             // 获取当前区块时间戳
-    ContractAddress() Address     // 获取当前合约地址
-    
-    // 账户操作相关
-    Sender() Address              // 获取交易发送者或调用合约
-    Balance(addr Address) uint64  // 获取账户余额
-    Transfer(to Address, amount uint64) error // 转账操作
-    
-    // 对象存储相关 - 基础状态操作使用panic而非返回error
-    CreateObject() Object                      // 创建新对象，失败时panic
-    GetObject(id ObjectID) (Object, error)     // 获取指定对象，可能返回error
-    GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
-    DeleteObject(id ObjectID)                  // 删除对象，失败时panic
-    
-    // 跨合约调用
-    Call(contract Address, function string, args ...any) ([]byte, error)
-    
-    // 日志与事件
-    Log(eventName string, keyValues ...interface{}) // 记录事件
-}
+// 区块链信息相关
+func BlockHeight() uint64          // 获取当前区块高度
+func BlockTime() int64             // 获取当前区块时间戳
+func ContractAddress() Address     // 获取当前合约地址
+
+// 账户操作相关
+func Sender() Address              // 获取交易发送者或调用合约
+func Balance(addr Address) uint64  // 获取账户余额
+
+// 对象存储相关 - 基础状态操作使用panic而非返回error
+func CreateObject() Object                      // 创建新对象，失败时panic
+func GetObject(id ObjectID) (Object, error)     // 获取指定对象，可能返回error
+func GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
+func DeleteObject(id ObjectID)                  // 删除对象，失败时panic
+
+// 跨合约调用
+func Call(contract Address, function string, args ...any) ([]byte, error)
+
+// 日志与事件
+func Log(eventName string, keyValues ...interface{}) // 记录事件
+
+// 辅助函数
+func Assert(condition any)                        // 断言函数，条件为假时panic
+func Error(msg string) error                      // 创建错误
+func GetHash(data []byte) Hash                    // 计算数据哈希
+func AddressFromString(str string) Address        // 从字符串创建地址
+func ObjectIDFromString(str string) ObjectID      // 从字符串创建对象ID
+func HashFromString(str string) Hash              // 从字符串创建哈希
 ```
 
 #### 3.1.3 Object接口
@@ -220,9 +230,27 @@ type Object interface {
 }
 ```
 
+#### 3.1.4 上下文管理
+
+系统内部通过`SetContext`函数设置当前执行上下文，对合约开发者透明：
+
+```go
+// 内部使用，合约开发者不可见
+var ctx types.Context
+
+func SetContext(c types.Context) {
+    if ctx != nil {
+        panic("context already set")
+    }
+    ctx = c
+}
+```
+
+这种设计确保了合约无法伪造或修改执行上下文，提高了系统安全性。
+
 ### 3.2 WebAssembly执行环境
 
-VM系统使用WebAssembly作为智能合约的执行环境，确保安全、高效和跨平台兼容。所有这些细节对合约开发者透明，他们只需要关注core接口，无需理解WebAssembly的内部工作机制：
+VM系统使用wazero作为WebAssembly运行时，确保安全、高效和跨平台兼容。所有这些细节对合约开发者透明，他们只需要关注core包函数，无需理解WebAssembly的内部工作机制：
 
 #### 3.2.1 合约编译流程
 
@@ -282,6 +310,57 @@ flowchart LR
         D
         E
     end
+```
+
+#### 3.2.3 wazero运行时
+
+VM系统使用wazero作为WebAssembly运行时，提供以下优势：
+
+1. **纯Go实现**：无需依赖外部WebAssembly运行时，简化部署
+2. **高性能**：接近原生性能的执行速度
+3. **安全性**：内置内存安全保证
+4. **跨平台**：在任何支持Go的环境中运行
+
+wazero运行时通过`WazeroVM`结构体实现，负责合约的部署和执行：
+
+```go
+// WazeroVM 使用wazero实现的虚拟机
+type WazeroVM struct {
+    // 合约存储目录
+    contractDir string
+    
+    // wazero运行时
+    ctx context.Context
+    
+    // env模块
+    envModule api.Module
+}
+```
+
+#### 3.2.4 合约存储
+
+合约代码通过`repository.Manager`进行管理，提供以下功能：
+
+1. **代码注册**：将合约代码注册到系统中
+2. **代码获取**：获取已注册的合约代码
+3. **代码注入**：注入gas消耗信息到合约代码中
+4. **元数据管理**：管理合约的元数据信息
+
+```go
+// Manager 代码管理器
+type Manager struct {
+    rootDir string // 代码根目录
+}
+
+// ContractCode 合约代码信息
+type ContractCode struct {
+    Address      core.Address // 合约地址
+    OriginalCode []byte       // 原始代码
+    InjectedCode []byte       // 注入gas信息后的代码
+    Dependencies []string     // 依赖的其他合约地址
+    UpdateTime   time.Time    // 最后更新时间
+    Hash         [32]byte     // 代码哈希
+}
 ```
 
 ### 3.3 调用链追踪机制
@@ -370,35 +449,77 @@ Gas计费系统从两个维度实现资源控制：
    - 支持条件语句、循环语句等复杂控制流结构
 
 2. **接口操作计费**：
-   - 所有的Context和Object接口调用都有固定的gas消耗
+   - 所有的包函数调用都有固定的gas消耗
    - 基础操作（如查询区块信息）消耗较少gas
    - 存储操作（如创建对象、修改字段）消耗较多gas
    - 合约调用等高级操作有额外的gas预留机制
 
-#### 3.6.2 Gas消耗值
+#### 3.6.2 Gas消耗实现
 
-| 接口 | 操作 | Gas消耗 |
-|-----|-----|---------|
-| **Context** | Sender() | 10 gas |
-| | BlockHeight() | 10 gas |
-| | BlockTime() | 10 gas |
-| | ContractAddress() | 10 gas |
-| | Balance(addr) | 50 gas |
-| | Transfer(to, amount) | 500 gas |
-| | Call(contract, function, args...) | 10000 gas + 被调用合约消耗 |
-| | CreateObject() | 50 gas |
-| | GetObject(id) | 50 gas |
-| | GetObjectWithOwner(owner) | 50 gas |
-| | DeleteObject(id) | 500 gas - 800 gas(退还) |
-| | Log(event, keyValues...) | 100 gas + 数据长度 |
-| **Object** | ID() | 10 gas |
-| | Contract() | 100 gas |
-| | Owner() | 100 gas |
-| | SetOwner(owner) | 500 gas |
-| | Get(field, value) | 100 gas + 结果数据大小 |
-| | Set(field, value) | 1000 gas + 数据大小 * 100 gas |
+Gas消耗通过`mock`包实现，提供以下功能：
 
-#### 3.6.3 Gas控制机制
+```go
+// ConsumeGas 消耗gas
+func ConsumeGas(amount int64) {
+    mu.Lock()
+    defer mu.Unlock()
+
+    if amount <= 0 {
+        return
+    }
+
+    if gas < amount {
+        panic(fmt.Sprintf("out of gas: gas=%d, need=%d", gas, amount))
+    }
+
+    gas -= amount
+    used += amount
+}
+
+// RefundGas 退还gas
+func RefundGas(amount int64) {
+    mu.Lock()
+    defer mu.Unlock()
+
+    if amount <= 0 {
+        return
+    }
+
+    if used < amount {
+        panic(fmt.Sprintf("invalid refund: used=%d, refund=%d", used, amount))
+    }
+
+    gas += amount
+    used -= amount
+}
+```
+
+#### 3.6.3 Gas消耗值
+
+| 操作 | Gas消耗 |
+|-----|---------|
+| **基础操作** | |
+| BlockHeight() | 10 gas |
+| BlockTime() | 10 gas |
+| ContractAddress() | 10 gas |
+| Sender() | 10 gas |
+| Balance(addr) | 50 gas |
+| **存储操作** | |
+| CreateObject() | 50 gas |
+| GetObject(id) | 50 gas |
+| GetObjectWithOwner(owner) | 50 gas |
+| DeleteObject(id) | 500 gas - 800 gas(退还) |
+| **高级操作** | |
+| Call(contract, function, args...) | 10000 gas + 被调用合约消耗 |
+| Log(event, keyValues...) | 100 gas + 数据长度 |
+| **对象操作** | |
+| ID() | 10 gas |
+| Owner() | 100 gas |
+| SetOwner(owner) | 500 gas |
+| Get(field, value) | 100 gas + 结果数据大小 |
+| Set(field, value) | 1000 gas + 数据大小 * 100 gas |
+
+#### 3.6.4 Gas控制机制
 
 VM系统的Gas控制具有以下特点：
 
@@ -489,7 +610,7 @@ VM系统实现了多层安全机制：
 
 ### 7.1 合约设计原则
 
-- **专注核心接口**：仅依赖core/interface.go中定义的Context和Object接口，不依赖任何实现细节
+- **专注核心包函数**：仅依赖`core`包中定义的函数，不依赖任何实现细节
 - **无状态设计**：合约逻辑不存储状态，而是操作外部对象
 - **所有权检查**：验证交易发送者是否有权执行操作
 - **错误处理**：提供清晰的错误信息，区分系统错误和业务错误
@@ -499,15 +620,15 @@ VM系统实现了多层安全机制：
 
 VM系统设计遵循"简单胜于复杂"的原则，为合约开发者提供极简的开发流程：
 
-1. **单一接口文件**：整个合约开发只需关注core/interface.go中定义的接口
+1. **单一包导入**：整个合约开发只需导入`core`包
    ```go
    import "github.com/govm-net/vm/core"
    ```
 
-2. **两个核心接口**：所有合约功能都通过Context和Object接口访问
+2. **包函数调用**：所有合约功能都通过包函数访问
    ```go
-   func Initialize(ctx core.Context) (core.ObjectID, error) {
-       obj := ctx.CreateObject()
+   func Initialize() (core.ObjectID, error) {
+       obj := core.CreateObject()
        // ... 业务逻辑 ...
        return obj.ID(), nil
    }
@@ -515,7 +636,7 @@ VM系统设计遵循"简单胜于复杂"的原则，为合约开发者提供极�
 
 3. **专注业务逻辑**：开发者只需专注于业务逻辑实现，无需了解底层WebAssembly细节
    ```go
-   func Transfer(ctx core.Context, to core.Address, amount uint64) error {
+   func Transfer(to core.Address, amount uint64) error {
        // 仅关注业务逻辑，底层细节由VM系统处理
        // ...
    }
@@ -536,7 +657,7 @@ VM系统设计遵循"简单胜于复杂"的原则，为合约开发者提供极�
 
 ### 7.5 简洁合约示例
 
-以下是一个遵循最佳实践的简洁合约示例，展示了如何只使用core/interface.go中的接口进行开发：
+以下是一个遵循最佳实践的简洁合约示例，展示了如何只使用`core`包中的函数进行开发：
 
 ```go
 package simpletoken
@@ -544,27 +665,27 @@ package simpletoken
 import "github.com/govm-net/vm/core"
 
 // Initialize 创建一个简单的代币合约
-func Initialize(ctx core.Context, name string, totalSupply uint64) (core.ObjectID, error) {
+func Initialize(name string, totalSupply uint64) (core.ObjectID, error) {
     // 创建代币信息对象
-    infoObj := ctx.CreateObject()
+    infoObj := core.CreateObject()
     infoObj.Set("name", name)
     infoObj.Set("total_supply", totalSupply)
     
     // 创建发行者余额对象
-    balanceObj := ctx.CreateObject()
+    balanceObj := core.CreateObject()
     balanceObj.Set("balance", totalSupply)
-    balanceObj.SetOwner(ctx.Sender())
+    balanceObj.SetOwner(core.Sender())
     
     // 记录初始化事件
-    ctx.Log("TokenInitialized", "name", name, "total_supply", totalSupply)
+    core.Log("TokenInitialized", "name", name, "total_supply", totalSupply)
     
     return infoObj.ID(), nil
 }
 
 // Transfer 在账户间转移代币
-func Transfer(ctx core.Context, to core.Address, amount uint64) error {
+func Transfer(to core.Address, amount uint64) error {
     // 获取发送者余额对象
-    senderObj, err := ctx.GetObjectWithOwner(ctx.Sender())
+    senderObj, err := core.GetObjectWithOwner(core.Sender())
     if err != nil {
         return err
     }
@@ -585,10 +706,10 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) error {
     }
     
     // 处理接收者余额
-    receiverObj, err := ctx.GetObjectWithOwner(to)
+    receiverObj, err := core.GetObjectWithOwner(to)
     if err != nil {
         // 接收者没有余额对象，创建一个
-        receiverObj = ctx.CreateObject()
+        receiverObj = core.CreateObject()
         receiverObj.SetOwner(to)
         receiverObj.Set("balance", amount)
     } else {
@@ -603,13 +724,13 @@ func Transfer(ctx core.Context, to core.Address, amount uint64) error {
     }
     
     // 记录转账事件
-    ctx.Log("Transfer", "from", ctx.Sender(), "to", to, "amount", amount)
+    core.Log("Transfer", "from", core.Sender(), "to", to, "amount", amount)
     
     return nil
 }
 ```
 
-这个示例展示了如何仅使用Context和Object接口实现完整的代币合约功能，无需引入其他依赖或了解系统内部实现细节。
+这个示例展示了如何仅使用`core`包中的函数实现完整的代币合约功能，无需引入其他依赖或了解系统内部实现细节。
 
 ## 8. 未来发展方向
 

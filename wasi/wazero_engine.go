@@ -350,7 +350,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 		if err := json.Unmarshal(argData, &params); err != nil {
 			return -1
 		}
-		err := ctx.Transfer(params.From, params.To, params.Amount)
+		err := ctx.Transfer(params.Contract, params.From, params.To, params.Amount)
 		if err != nil {
 			return -1
 		}
