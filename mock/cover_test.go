@@ -24,8 +24,8 @@ func TestFunc(x int) int {
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.Enter(core.AddressFromString("0x12345678"), "TestFunc")
-	defer mock.Exit(core.AddressFromString("0x12345678"), "TestFunc")
+	mock.Enter("0x12345678", "TestFunc")
+	defer mock.Exit("0x12345678", "TestFunc")
 	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
 	y := x + 1
 	return y
@@ -59,8 +59,8 @@ var vm_cover_atomic_ = struct {
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.Enter(core.AddressFromString("0x12345678"), "TestFunc")
-	defer mock.Exit(core.AddressFromString("0x12345678"), "TestFunc")
+	mock.Enter("0x12345678", "TestFunc")
+	defer mock.Exit("0x12345678", "TestFunc")
 	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
 	a := x + 1
 	b := a * 2
@@ -96,8 +96,8 @@ var vm_cover_atomic_ = struct {
             import "github.com/govm-net/vm/mock"
             
             func TestFunc(x int) int {
-            	mock.Enter(core.AddressFromString("0x12345678"), "TestFunc")
-            	defer mock.Exit(core.AddressFromString("0x12345678"), "TestFunc")
+            	mock.Enter("0x12345678", "TestFunc")
+            	defer mock.Exit("0x12345678", "TestFunc")
             	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
             	if x > 0 {
             		mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[2]))
@@ -142,8 +142,8 @@ var vm_cover_atomic_ = struct {
             import "fmt"
             
             func TestFunc(x int) int {
-            	mock.Enter(core.AddressFromString("0x12345678"), "TestFunc")
-            	defer mock.Exit(core.AddressFromString("0x12345678"), "TestFunc")
+            	mock.Enter("0x12345678", "TestFunc")
+            	defer mock.Exit("0x12345678", "TestFunc")
             	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
             	fmt.Println(x)
             	return x

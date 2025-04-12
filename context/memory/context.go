@@ -42,8 +42,8 @@ func init() {
 // NewDefaultBlockchainContext creates a new simple blockchain context
 func NewBlockchainContext(params map[string]any) types.BlockchainContext {
 	return &defaultBlockchainContext{
-		blockHeight:    1,
-		blockTime:      2,
+		blockHeight:    0,
+		blockTime:      0,
 		balances:       make(map[core.Address]uint64),
 		objects:        make(map[core.ObjectID]map[string][]byte),
 		objectOwner:    make(map[core.ObjectID]core.Address),
@@ -143,13 +143,13 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 
 	// Create object storage
 	ctx.objects[id] = make(map[string][]byte)
-	ctx.objectOwner[id] = ctx.Sender()
+	ctx.objectOwner[id] = contract
 	ctx.objectContract[id] = contract
 
 	// Return object wrapper
 	return &vmObject{
 		ctx:         ctx,
-		objOwner:    ctx.Sender(),
+		objOwner:    contract,
 		objContract: contract,
 		id:          id,
 	}, nil
@@ -175,9 +175,7 @@ func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, 
 
 // generateObjectID generates a new object ID
 func (ctx *defaultBlockchainContext) generateObjectID(contract types.Address, sender types.Address) core.ObjectID {
-	ctx.mu.Lock()
 	ctx.nonce++
-	ctx.mu.Unlock()
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%s-%s-%s-%d", contract, sender, ctx.txHash, ctx.nonce)))
 	var id core.ObjectID
 	copy(id[:], hash[:])

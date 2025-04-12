@@ -160,11 +160,8 @@ func TestEventLogging(t *testing.T) {
 	require.NoError(t, ctx.db.Create(block).Error)
 	ctx.currentBlock = block
 
-	tx := &DBTransaction{
-		Hash: "0xtx",
-	}
-	require.NoError(t, ctx.db.Create(tx).Error)
-	ctx.currentTx = tx
+	tx := core.HashFromString("0x124578")
+	ctx.SetTransactionInfo(tx, core.ZeroAddress, core.ZeroAddress, 1000)
 
 	contract := core.AddressFromString("0xcontract")
 
@@ -181,7 +178,7 @@ func TestEventLogging(t *testing.T) {
 	require.NoError(t, result.Error)
 
 	assert.Equal(t, uint64(100), event.BlockHeight)
-	assert.Equal(t, "0xtx", event.TxHash)
+	assert.Equal(t, tx.String(), event.TxHash)
 	assert.Equal(t, contract.String(), event.Contract)
 	assert.Equal(t, "TestEvent", event.EventName)
 
