@@ -60,14 +60,20 @@ func GetHash(data []byte) Hash {
 	return Hash(sha256.Sum256(data))
 }
 
-func Assert(condition any) {
+func Assert(condition any, msgs ...any) {
 	switch v := condition.(type) {
 	case bool:
 		if !v {
+			if len(msgs) > 0 {
+				Log("assertion failed", msgs...)
+			}
 			panic("assertion failed")
 		}
 	case error:
 		if v != nil {
+			if len(msgs) > 0 {
+				Log(v.Error(), msgs...)
+			}
 			panic(v)
 		}
 	}
