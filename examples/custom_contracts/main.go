@@ -10,11 +10,14 @@ import (
 
 func main() {
 	api.DefaultContractConfig = func() api.ContractConfig {
-		cfg := api.DefaultContractConfig()
-		cfg.AllowedImports = []string{
-			"github.com/govm-net/vm/examples/custom_contracts/core",
+		return api.ContractConfig{
+			MaxGas:       1000000,
+			MaxCallDepth: 8,
+			MaxCodeSize:  1024 * 1024, // 1MB
+			AllowedImports: []string{
+				"github.com/govm-net/vm/examples/custom_contracts/core",
+			},
 		}
-		return cfg
 	}
 	// 定义子命令
 	deployCommand := flag.NewFlagSet("deploy", flag.ExitOnError)

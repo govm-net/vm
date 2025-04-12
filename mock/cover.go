@@ -32,7 +32,7 @@ var DefaultTraceGenerator CallTraceGenerator = func(packageName, funcName string
 			Args: []ast.Expr{
 				&ast.BasicLit{
 					Kind:  token.STRING,
-					Value: `core.AddressFromString("` + packageName + `")`,
+					Value: `"` + packageName + `"`,
 				},
 				&ast.BasicLit{
 					Kind:  token.STRING,
@@ -50,7 +50,7 @@ var DefaultTraceGenerator CallTraceGenerator = func(packageName, funcName string
 			Args: []ast.Expr{
 				&ast.BasicLit{
 					Kind:  token.STRING,
-					Value: `core.AddressFromString("` + packageName + `")`,
+					Value: `"` + packageName + `"`,
 				},
 				&ast.BasicLit{
 					Kind:  token.STRING,

@@ -7,7 +7,7 @@ import (
 
 var (
 	// callStack stores the contract call hierarchy
-	callStack []core.Address
+	callStack []string
 )
 
 // GetCurrentContract returns the address of the currently executing contract
@@ -16,7 +16,8 @@ func GetCurrentContract() core.Address {
 	if len(callStack) == 0 {
 		return core.Address{}
 	}
-	return callStack[len(callStack)-1]
+	addr := callStack[len(callStack)-1]
+	return core.AddressFromString(addr)
 }
 
 // GetCaller returns the address of the contract that called the current contract
@@ -34,7 +35,7 @@ func GetCaller() core.Address {
 	// This correctly handles cases where a contract calls its own functions
 	for i := len(callStack) - 2; i >= 0; i-- {
 		if callStack[i] != currentContract {
-			return callStack[i]
+			return core.AddressFromString(callStack[i])
 		}
 	}
 
@@ -44,12 +45,12 @@ func GetCaller() core.Address {
 }
 
 // Enter records function entry by pushing the contract address onto the call stack
-func Enter(contract core.Address, function string) {
+func Enter(contract string, function string) {
 	callStack = append(callStack, contract)
 }
 
 // Exit records function exit by popping the top contract address from the call stack
-func Exit(contract core.Address, function string) {
+func Exit(contract string, function string) {
 	if len(callStack) > 0 {
 		callStack = callStack[:len(callStack)-1]
 	}

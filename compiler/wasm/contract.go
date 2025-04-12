@@ -663,8 +663,8 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 
 	// Read parameters
 	paramsBytes := input.Args
-	mock.Enter(input.Sender, "handle_contract_call")
-	mock.Enter(input.Contract, functionName)
+	mock.Enter(input.Sender.String(), "handle_contract_call")
+	mock.Enter(input.Contract.String(), functionName)
 
 	// Use mock module to record function entry
 	ctx := &Context{}
