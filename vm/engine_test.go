@@ -28,6 +28,7 @@ func TestNewEngine(t *testing.T) {
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),
+		ContextType:      "memory",
 	}
 
 	// 创建引擎实例
@@ -58,6 +59,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),
+		ContextType:      "memory",
 	}
 
 	// 创建引擎实例
@@ -93,19 +95,19 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	// 执行Initialize函数
 	_, err = engine.Execute(contractAddr, "Initialize", nil)
 	if err != nil {
-		t.Fatalf("ExecuteContract(Initialize) error = %v", err)
+		t.Fatalf("Execute(Initialize) error = %v", err)
 	}
 
 	// 执行Increment函数
 	_, err = engine.Execute(contractAddr, "Increment", []byte(`{"value": 5}`))
 	if err != nil {
-		t.Fatalf("ExecuteContract(Increment) error = %v", err)
+		t.Fatalf("Execute(Increment) error = %v", err)
 	}
 
 	// GetCounter
 	result, err := engine.Execute(contractAddr, "GetCounter", nil)
 	if err != nil {
-		t.Fatalf("ExecuteContract(GetCounter) error = %v", err)
+		t.Fatalf("Execute(GetCounter) error = %v", err)
 	}
 	var hopeResult uint64
 	d, _ := json.Marshal(result)
@@ -140,6 +142,7 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),
+		ContextType:      "memory",
 	}
 
 	// 创建引擎实例

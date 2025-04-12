@@ -192,6 +192,12 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (
 		Export("get_balance")
 
 	// Initialize WASI
+	envModule, err := builder.Instantiate(vm.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("实例化导入对象失败: %w", err)
+	}
+	vm.envModule = envModule
+
 	wasi_snapshot_preview1.MustInstantiate(vm.ctx, runtime)
 
 	// Create module configuration

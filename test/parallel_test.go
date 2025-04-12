@@ -80,7 +80,7 @@ func BenchmarkParallelExecution(b *testing.B) {
 	// 运行基准测试
 	for i := 0; i < b.N; i++ {
 		var wg sync.WaitGroup
-		for j := 0; j < 5; j++ { // 每次迭代执行5个并行交易
+		for j := 0; j < 15; j++ { // 每次迭代执行5个并行交易
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

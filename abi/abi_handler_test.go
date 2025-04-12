@@ -211,11 +211,17 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
                 "fmt"
         )
         
+        func init() {
+        	if false {
+        		fmt.Println("init")
+        		json.Marshal(nil)
+        	}
+        }
+        
         type GetBalanceParams struct {
         }
         
         func handleGetBalance(params []byte) (any, error) {
-                // 调用原始函数
                 result0 := GetBalance()
         
                 return result0, nil
@@ -225,7 +231,6 @@ func TestGenerateHandlerFileWithNoInputs(t *testing.T) {
         }
         
         func handleGetTimestamp(params []byte) (any, error) {
-                // 调用原始函数
                 result0 := GetTimestamp()
         
                 return result0, nil
