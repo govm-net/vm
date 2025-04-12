@@ -76,9 +76,9 @@ var DefaultKeywordValidator IKeywordValidator = func(node ast.Node) error {
 	return nil
 }
 
-type IContractAddressGenerator func(code []byte) types.Address
+type IContractAddressGenerator func(code []byte, sender types.Address) types.Address
 
-var DefaultContractAddressGenerator IContractAddressGenerator = func(code []byte) types.Address {
+var DefaultContractAddressGenerator IContractAddressGenerator = func(code []byte, sender types.Address) types.Address {
 	var addr types.Address
 	hash := sha256.Sum256(code)
 	copy(addr[:], hash[:])

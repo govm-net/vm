@@ -1,23 +1,23 @@
-// 基于wasm包装层的简单计数器合约示例
+// Simple counter contract example based on wasm wrapper layer
 package testdata
 
 import (
 	"github.com/govm-net/vm/core"
 )
 
-// 计数器合约的状态键
+// Counter contract state key
 const (
 	CounterKey = "counter_value"
 )
 
-// 初始化合约
-// 此函数是大写开头的，因此会被自动导出并在合约部署时调用
+// Initialize contract
+// This function starts with uppercase, so it will be automatically exported and called when the contract is deployed
 func Initialize() int32 {
-	// 获取合约的默认Object（空ObjectID）
+	// Get contract's default Object (empty ObjectID)
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
-	// 初始化计数器值为0
+	// Initialize counter value to 0
 	err = defaultObj.Set(CounterKey, uint64(0))
 	core.Assert(err)
 
@@ -25,25 +25,25 @@ func Initialize() int32 {
 	return 0
 }
 
-// 增加计数器
+// Increment counter
 func Increment(value uint64) uint64 {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
-	// 获取当前计数器值
+	// Get current counter value
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
 	core.Assert(err)
 
-	// 增加计数器值
+	// Increment counter value
 	newValue := currentValue + value
 
-	// 更新计数器值
+	// Update counter value
 	err = defaultObj.Set(CounterKey, newValue)
 	core.Assert(err)
 
-	// 记录事件
+	// Record event
 	core.Log("increment",
 		"from", currentValue,
 		"add", value,
@@ -53,13 +53,13 @@ func Increment(value uint64) uint64 {
 	return newValue
 }
 
-// 获取计数器当前值
+// Get current counter value
 func GetCounter() uint64 {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
-	// 获取当前计数器值
+	// Get current counter value
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
 	core.Assert(err)
@@ -67,21 +67,21 @@ func GetCounter() uint64 {
 	return currentValue
 }
 
-// 重置计数器值为0
+// Reset counter value to 0
 func Reset() {
-	// 检查调用者是否为合约所有者
+	// Check if caller is contract owner
 	if core.Sender() != core.ContractAddress() {
 		return
 	}
 
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
-	// 重置计数器值为0
+	// Reset counter value to 0
 	err = defaultObj.Set(CounterKey, uint64(0))
 	core.Assert(err)
 
-	// 记录事件
+	// Record event
 	core.Log("reset", "sender", core.Sender())
 }

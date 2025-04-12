@@ -94,39 +94,39 @@ func HashFromString(str string) Hash {
 
 // Context 是合约与区块链环境交互的主要接口
 type Context interface {
-	// 区块链信息相关
-	BlockHeight() uint64      // 获取当前区块高度
-	BlockTime() int64         // 获取当前区块时间戳
-	ContractAddress() Address // 获取当前合约地址
+	// Blockchain information related
+	BlockHeight() uint64      // Get current block height
+	BlockTime() int64         // Get current block timestamp
+	ContractAddress() Address // Get current contract address
 
-	// 账户操作相关
-	Sender() Address                                // 获取交易发送者或调用合约
-	Balance(addr Address) uint64                    // 获取账户余额
-	Transfer(from, to Address, amount uint64) error // 转账操作
+	// Account operations related
+	Sender() Address                                // Get transaction sender or contract caller
+	Balance(addr Address) uint64                    // Get account balance
+	Transfer(from, to Address, amount uint64) error // Transfer operation
 
-	// 对象存储相关 - 基础状态操作使用panic而非返回error
-	CreateObject() Object                             // 创建新对象，失败时panic
-	GetObject(id ObjectID) (Object, error)            // 获取指定对象，可能返回error
-	GetObjectWithOwner(owner Address) (Object, error) // 按所有者获取对象，可能返回error
-	DeleteObject(id ObjectID)                         // 删除对象，失败时panic
+	// Object storage related - Basic state operations use panic instead of returning error
+	CreateObject() Object                             // Create new object, panic on failure
+	GetObject(id ObjectID) (Object, error)            // Get specified object, may return error
+	GetObjectWithOwner(owner Address) (Object, error) // Get object by owner, may return error
+	DeleteObject(id ObjectID)                         // Delete object, panic on failure
 
-	// 跨合约调用
+	// Cross-contract calls
 	Call(contract Address, function string, args ...any) ([]byte, error)
 
-	// 日志与事件
-	Log(eventName string, keyValues ...interface{}) // 记录事件
+	// Logs and events
+	Log(eventName string, keyValues ...any) // Log event
 }
 
 // Object 接口用于管理区块链状态对象
 type Object interface {
-	ID() ObjectID          // 获取对象ID
-	Owner() Address        // 获取对象所有者
-	Contract() Address     // 获取对象所属合约
-	SetOwner(addr Address) // 设置对象所有者，失败时panic
+	ID() ObjectID          // Get object ID
+	Owner() Address        // Get object owner
+	Contract() Address     // Get object's contract
+	SetOwner(addr Address) // Set object owner, panic on failure
 
-	// 字段操作
-	Get(field string, value any) error // 获取字段值
-	Set(field string, value any) error // 设置字段值
+	// Field operations
+	Get(field string, value any) error // Get field value
+	Set(field string, value any) error // Set field value
 }
 
 type TransferParams struct {
@@ -185,9 +185,9 @@ type SetObjectFieldParams struct {
 }
 
 type ExecutionResult struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Data    any    `json:"data,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type LogParams struct {
@@ -209,40 +209,40 @@ type BlockchainContext interface {
 	// set block info and transaction info
 	SetBlockInfo(height uint64, time int64, hash Hash) error
 	SetTransactionInfo(hash Hash, from Address, to Address, value uint64) error
-	// 区块链信息相关
-	BlockHeight() uint64      // 获取当前区块高度
-	BlockTime() int64         // 获取当前区块时间戳
-	ContractAddress() Address // 获取当前合约地址
-	TransactionHash() Hash    // 获取当前交易哈希
-	SetGasLimit(limit int64)  // 设置gas限制
-	GetGas() int64            // 获取已使用gas
-	// 账户操作相关
-	Sender() Address                                          // 获取交易发送者或调用合约
-	Balance(addr Address) uint64                              // 获取账户余额
-	Transfer(contract, from, to Address, amount uint64) error // 转账操作
+	// Blockchain information related
+	BlockHeight() uint64      // Get current block height
+	BlockTime() int64         // Get current block timestamp
+	ContractAddress() Address // Get current contract address
+	TransactionHash() Hash    // Get current transaction hash
+	SetGasLimit(limit int64)  // Set gas limit
+	GetGas() int64            // Get used gas
+	// Account operations related
+	Sender() Address                                          // Get transaction sender or contract caller
+	Balance(addr Address) uint64                              // Get account balance
+	Transfer(contract, from, to Address, amount uint64) error // Transfer operation
 
-	// 对象存储相关 - 基础状态操作使用panic而非返回error
-	CreateObject(contract Address) (VMObject, error)                      // 创建新对象
-	CreateObjectWithID(contract Address, id ObjectID) (VMObject, error)   // 创建新对象
-	GetObject(contract Address, id ObjectID) (VMObject, error)            // 获取指定对象
-	GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // 按所有者获取对象
-	DeleteObject(contract Address, id ObjectID) error                     // 删除对象
+	// Object storage related - Basic state operations use panic instead of returning error
+	CreateObject(contract Address) (VMObject, error)                      // Create new object
+	CreateObjectWithID(contract Address, id ObjectID) (VMObject, error)   // Create new object
+	GetObject(contract Address, id ObjectID) (VMObject, error)            // Get specified object
+	GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // Get object by owner
+	DeleteObject(contract Address, id ObjectID) error                     // Delete object
 
-	// 跨合约调用
+	// Cross-contract calls
 	Call(caller Address, contract Address, function string, args ...any) ([]byte, error)
 
-	// 日志与事件
-	Log(contract Address, eventName string, keyValues ...any) // 记录事件
+	// Logs and events
+	Log(contract Address, eventName string, keyValues ...any) // Log event
 }
 
 // Object 接口用于管理区块链状态对象
 type VMObject interface {
-	ID() ObjectID                                  // 获取对象ID
-	Owner() Address                                // 获取对象所有者
-	Contract() Address                             // 获取对象所属合约
-	SetOwner(contract, sender, addr Address) error // 设置对象所有者
+	ID() ObjectID                                  // Get object ID
+	Owner() Address                                // Get object owner
+	Contract() Address                             // Get object's contract
+	SetOwner(contract, sender, addr Address) error // Set object owner
 
-	// 字段操作
-	Get(contract Address, field string) ([]byte, error)             // 获取字段值
-	Set(contract, sender Address, field string, value []byte) error // 设置字段值
+	// Field operations
+	Get(contract Address, field string) ([]byte, error)             // Get field value
+	Set(contract, sender Address, field string, value []byte) error // Set field value
 }

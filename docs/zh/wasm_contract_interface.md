@@ -24,12 +24,12 @@ flowchart LR
     end
 ```
 
-- **合约侧接口 (wasm/contract.go)**: 提供面向合约开发者的 API，实现 Context 和 Object 接口
-- **主机侧接口 (host/runner.go)**: 实现合约调用的宿主函数，管理状态和资源
+- **合约侧接口 (compiler/wasm/contract.go)**: 提供面向合约开发者的 API，实现 Context 和 Object 接口
+- **主机侧接口 (wasi/wazero_engine.go)**: 实现合约调用的宿主函数，管理状态和资源
 
 ## 2. 合约侧接口详解
 
-合约侧接口在 wasm/contract.go 中实现，作为合约代码与主机环境之间的桥梁。
+合约侧接口在 compiler/wasm/contract.go 中实现，作为合约代码与主机环境之间的桥梁。
 
 ### 2.1 导出函数
 
@@ -265,90 +265,92 @@ type Object interface {
 
 ## 3. 主机侧接口详解
 
-主机侧接口在 host/runner.go 中实现，负责处理合约的请求并提供资源控制。
+主机侧接口在 context/memory/context.go 和 context/db/context.go 中实现，负责处理合约的请求并提供资源控制。
 
 ### 3.1 状态管理
 
 主机环境维护一个包含区块链状态的结构：
 
 ```go
-// defaultBlockchainContext 实现了默认的区块链上下文
-type defaultBlockchainContext struct {
+// Context 实现了区块链上下文
+type Context struct {
     // 区块信息
     blockHeight uint64
     blockTime   int64
+    blockHash   core.Hash
 
-    // 账户余额
-    balances map[types.Address]uint64
+    // 交易信息
+    txHash core.Hash
+    sender core.Address
+    to     core.Address
+    value  uint64
+    nonce  uint64
 
-    // 虚拟机对象存储
-    objects        map[core.ObjectID]map[string][]byte
-    objectOwner    map[core.ObjectID]core.Address
-    objectContract map[core.ObjectID]core.Address
-
-    // 当前执行上下文
-    contractAddr types.Address
-    sender       types.Address
-    txHash       core.Hash
-    nonce        uint64
+    // 合约信息
+    contractAddr core.Address
     gasLimit     int64
+    usedGas      int64
+
+    // 状态存储
+    objects map[core.ObjectID]*Object
+    balances map[core.Address]uint64
 }
 ```
 
 ### 3.2 BlockchainContext 接口
 
-主机环境实现了 BlockchainContext 接口，提供更丰富的区块链状态管理功能：
+主机环境实现了 BlockchainContext 接口，提供区块链状态管理功能：
 
 ```go
 // BlockchainContext 接口定义
 type BlockchainContext interface {
     // 设置区块和交易信息
-    SetBlockInfo(height uint64, time int64, hash Hash) error
-    SetTransactionInfo(hash Hash, from Address, to Address, value uint64) error
+    SetBlockInfo(height uint64, time int64, hash core.Hash)
+    SetTransactionInfo(hash core.Hash, from, to core.Address, value uint64, nonce uint64)
     
     // 区块链信息相关
     BlockHeight() uint64      // 获取当前区块高度
     BlockTime() int64         // 获取当前区块时间戳
-    ContractAddress() Address // 获取当前合约地址
-    TransactionHash() Hash    // 获取当前交易哈希
+    ContractAddress() core.Address // 获取当前合约地址
+    TransactionHash() core.Hash    // 获取当前交易哈希
     SetGasLimit(limit int64)  // 设置gas限制
     GetGas() int64            // 获取已使用gas
     
     // 账户操作相关
-    Sender() Address                                          // 获取交易发送者或调用合约
-    Balance(addr Address) uint64                              // 获取账户余额
-    Transfer(contract, from, to Address, amount uint64) error // 转账操作
+    Sender() core.Address                                          // 获取交易发送者
+    Balance(addr core.Address) uint64                              // 获取账户余额
+    Transfer(contract, from, to core.Address, amount uint64) error // 转账操作
 
     // 对象存储相关
-    CreateObject(contract Address) (VMObject, error)                      // 创建新对象
-    CreateObjectWithID(contract Address, id ObjectID) (VMObject, error)   // 创建新对象
-    GetObject(contract Address, id ObjectID) (VMObject, error)            // 获取指定对象
-    GetObjectWithOwner(contract Address, owner Address) (VMObject, error) // 按所有者获取对象
-    DeleteObject(contract Address, id ObjectID) error                     // 删除对象
+    CreateObject(contract core.Address) (core.Object, error)                      // 创建新对象
+    CreateObjectWithID(contract core.Address, id core.ObjectID) (core.Object, error)   // 创建新对象
+    GetObject(contract core.Address, id core.ObjectID) (core.Object, error)            // 获取指定对象
+    GetObjectWithOwner(contract core.Address, owner core.Address) (core.Object, error) // 按所有者获取对象
+    DeleteObject(contract core.Address, id core.ObjectID) error                     // 删除对象
 
     // 跨合约调用
-    Call(caller Address, contract Address, function string, args ...any) ([]byte, error)
+    Call(caller core.Address, contract core.Address, function string, args ...any) ([]byte, error)
 
     // 日志与事件
-    Log(contract Address, eventName string, keyValues ...any) // 记录事件
+    Log(contract core.Address, eventName string, keyValues ...any) // 记录事件
 }
 ```
 
-### 3.3 VMObject 接口
+### 3.3 Object 接口
 
-主机环境还实现了 VMObject 接口，提供对象状态管理功能：
+主机环境实现了 Object 接口，提供对象状态管理功能：
 
 ```go
-// VMObject 接口定义
-type VMObject interface {
-    ID() ObjectID                                  // 获取对象ID
-    Owner() Address                                // 获取对象所有者
-    Contract() Address                             // 获取对象所属合约
-    SetOwner(contract, sender, addr Address) error // 设置对象所有者
+// Object 接口定义
+type Object interface {
+    ID() core.ObjectID                                  // 获取对象ID
+    Owner() core.Address                                // 获取对象所有者
+    Contract() core.Address                             // 获取对象所属合约
+    SetOwner(contract, sender, addr core.Address) error // 设置对象所有者
 
     // 字段操作
-    Get(contract Address, field string) ([]byte, error)             // 获取字段值
-    Set(contract, sender Address, field string, value []byte) error // 设置字段值
+    Get(contract core.Address, field string) ([]byte, error)             // 获取字段值
+    Set(contract, sender core.Address, field string, value []byte) error // 设置字段值
 }
 ```
 
@@ -358,27 +360,44 @@ type VMObject interface {
 
 ```go
 // 处理设置类操作的函数
-func callHostSetHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error) {
+func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, funcID uint32, argData []byte, bufferPtr uint32) int32 {
     // 处理不需要返回复杂数据的操作
+    switch types.WasmFunctionID(funcID) {
+    case types.FuncTransfer:
+        // 处理转账
+    case types.FuncCall:
+        // 处理合约调用
+    case types.FuncDeleteObject:
+        // 处理对象删除
+    case types.FuncLog:
+        // 处理日志记录
+    case types.FuncSetObjectOwner:
+        // 处理设置对象所有者
+    case types.FuncSetObjectField:
+        // 处理设置对象字段
+    }
 }
 
 // 处理获取缓冲区数据的函数
-func callHostGetBufferHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error) {
+func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Module, funcID uint32, argData []byte, offset uint32) int32 {
     // 处理需要返回复杂数据的操作
+    switch types.WasmFunctionID(funcID) {
+    case types.FuncGetSender:
+        // 获取发送者
+    case types.FuncGetContractAddress:
+        // 获取合约地址
+    case types.FuncCreateObject:
+        // 创建对象
+    case types.FuncGetObjectField:
+        // 获取对象字段
+    case types.FuncGetObject:
+        // 获取对象
+    case types.FuncGetObjectWithOwner:
+        // 获取所有者对象
+    case types.FuncGetObjectOwner:
+        // 获取对象所有者
+    }
 }
-```
-
-此外，还提供直接的数据获取函数：
-
-```go
-// 获取区块高度处理函数
-func getBlockHeightHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
-
-// 获取区块时间处理函数
-func getBlockTimeHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
-
-// 获取余额处理函数
-func getBalanceHandler(memory *wazero.Memory) func([]wazero.Value) ([]wazero.Value, error)
 ```
 
 ## 4. 通信流程
@@ -487,6 +506,12 @@ type CallParams struct {
     GasLimit int64   `json:"gas_limit,omitempty"`
 }
 
+// CallResult 合约调用结果
+type CallResult struct {
+    Data    []byte `json:"data,omitempty"`
+    GasUsed int64  `json:"gas_used,omitempty"`
+}
+
 // GetObjectParams 获取对象参数
 type GetObjectParams struct {
     Contract Address  `json:"contract,omitempty"`
@@ -529,6 +554,13 @@ type SetObjectFieldParams struct {
     Value    any      `json:"value,omitempty"`
 }
 
+// ExecutionResult 执行结果
+type ExecutionResult struct {
+    Success bool   `json:"success"`
+    Data    any    `json:"data,omitempty"`
+    Error   string `json:"error,omitempty"`
+}
+
 // LogParams 日志参数
 type LogParams struct {
     Contract  Address `json:"contract,omitempty"`
@@ -543,6 +575,57 @@ type HandleContractCallParams struct {
     Function string  `json:"function,omitempty"`
     Args     []byte  `json:"args,omitempty"`
     GasLimit int64   `json:"gas_limit,omitempty"`
+}
+```
+
+### 4.5 缓冲区大小
+
+系统使用固定大小的缓冲区进行数据交换：
+
+```go
+// HostBufferSize 定义了主机与合约之间数据交换的缓冲区大小
+const HostBufferSize int32 = 2048
+```
+
+### 4.6 类型定义
+
+系统使用以下基本类型：
+
+```go
+// Address 表示区块链上的地址
+type Address [20]byte
+
+// ObjectID 表示状态对象的唯一标识符
+type ObjectID [32]byte
+
+// Hash 表示哈希值
+type Hash [32]byte
+```
+
+这些类型提供了字符串转换方法：
+
+```go
+func (id ObjectID) String() string {
+    return hex.EncodeToString(id[:])
+}
+
+func (addr Address) String() string {
+    return hex.EncodeToString(addr[:])
+}
+
+func (h Hash) String() string {
+    return hex.EncodeToString(h[:])
+}
+
+func HashFromString(str string) Hash {
+    str = strings.TrimPrefix(str, "0x")
+    h, err := hex.DecodeString(str)
+    if err != nil {
+        return Hash{}
+    }
+    var out Hash
+    copy(out[:], h)
+    return out
 }
 ```
 
@@ -701,39 +784,11 @@ mock.RefundGas(50)
 mock.ResetGas(500000)
 ```
 
-## 6. 安全考虑
-
-WebAssembly 智能合约接口系统实现了多层安全机制：
-
-### 6.1 内存安全
-
-- **边界检查**：对所有内存访问进行严格的边界检查
-- **指针验证**：验证传递的内存指针的有效性
-- **内存隔离**：合约只能访问自己的内存空间
-- **内存分配控制**：通过导出的分配函数管理内存使用
-
-### 6.2 资源控制
-
-- **内存限制**：设置WebAssembly实例可使用的最大内存
-- **执行时间控制**：可实现执行超时机制
-- **指令计数**：可引入指令计数机制限制执行步骤
-
-## 7. 性能优化
-
-系统采用了多种优化技术提高性能：
-
-### 7.1 内存优化
-
-- **共享缓冲区**：使用预分配的共享缓冲区减少内存分配
-- **内存复用**：减少内存分配和拷贝操作
-- **序列化优化**：高效的二进制序列化格式
-- **TinyGo内存管理**：合约使用TinyGo的垃圾收集机制，通过预分配和内存复用优化性能
-
-## 8. 接口扩展
+## 6. 接口扩展
 
 系统提供了多种扩展接口，以满足不同业务需求：
 
-### 8.1 日志与事件
+### 6.1 日志与事件
 
 系统提供了日志与事件接口，用于记录合约执行过程中的关键事件：
 
@@ -749,7 +804,7 @@ func (c *Context) Log(eventName string, keyValues ...interface{}) {
 }
 ```
 
-### 8.2 跨合约调用
+### 6.2 跨合约调用
 
 系统提供了跨合约调用接口，允许合约之间进行安全的交互：
 
@@ -765,20 +820,8 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
 }
 ```
 
-## 9. 最佳实践
 
-使用WebAssembly智能合约接口系统的最佳实践：
-
-1. **最小化跨边界调用**：减少合约和主机环境之间的调用次数
-2. **优化数据序列化**：减少不必要的数据转换和序列化
-3. **合理使用缓冲区**：大数据使用缓冲区，小数据直接传递
-4. **注意内存安全**：总是验证内存指针和长度的有效性
-5. **错误处理**：妥善处理所有错误情况，不假设调用总是成功
-6. **资源限制**：设置合理的内存和执行时间限制
-7. **重用缓冲区**：为减少内存压力，合约代码应尽量重用缓冲区而非频繁分配内存
-8. **类型安全序列化**：使用带类型信息的序列化方法，避免数值类型转换问题
-
-## 10. 总结
+## 7. 总结
 
 WebAssembly智能合约接口系统为Go语言编写的智能合约提供了高效、安全的执行环境。通过精心设计的通信接口，合约代码能够安全地访问区块链状态和功能，同时主机环境保持对资源使用的严格控制。
 

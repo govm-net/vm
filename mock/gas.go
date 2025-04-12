@@ -11,7 +11,7 @@ var (
 	used int64
 )
 
-// InitGas 初始化gas
+// InitGas initializes gas
 func InitGas(initialGas int64) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -19,21 +19,21 @@ func InitGas(initialGas int64) {
 	used = 0
 }
 
-// GetGas 获取剩余gas
+// GetGas gets remaining gas
 func GetGas() int64 {
 	mu.RLock()
 	defer mu.RUnlock()
 	return gas
 }
 
-// GetUsedGas 获取已使用的gas
+// GetUsedGas gets consumed gas
 func GetUsedGas() int64 {
 	mu.RLock()
 	defer mu.RUnlock()
 	return used
 }
 
-// ConsumeGas 消耗gas
+// ConsumeGas consumes gas
 func ConsumeGas(amount int64) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -50,7 +50,7 @@ func ConsumeGas(amount int64) {
 	used += amount
 }
 
-// RefundGas 退还gas
+// RefundGas refunds gas
 func RefundGas(amount int64) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -67,7 +67,7 @@ func RefundGas(amount int64) {
 	used -= amount
 }
 
-// ResetGas 重置gas
+// ResetGas resets gas
 func ResetGas(initialGas int64) {
 	mu.Lock()
 	defer mu.Unlock()

@@ -1,4 +1,4 @@
-// 基于wasm包装层的简单计数器合约示例
+// Simple counter contract example based on wasm wrapper layer
 package main
 
 import (
@@ -8,25 +8,25 @@ import (
 	"github.com/govm-net/vm/core"
 )
 
-// 计数器合约的状态键
+// Counter contract state key
 const (
 	CounterKey = "counter_value"
 )
 
-// 初始化合约
-// 此函数是大写开头的，因此会被自动导出并在合约部署时调用
+// Initialize contract
+// This function is uppercase, so it will be automatically exported and called when the contract is deployed
 func Initialize() int32 {
-	// 获取合约的默认Object（空ObjectID）
+	// Get contract's default Object (empty ObjectID)
 	defaultObj, err := core.GetObject(ObjectID{})
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get default object failed: %v", err))
 		return -1
 	}
 
-	// 初始化计数器值为0
+	// Initialize counter value to 0
 	err = defaultObj.Set(CounterKey, uint64(0))
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("初始化失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Initialize failed: %v", err))
 		return -1
 	}
 
@@ -34,34 +34,34 @@ func Initialize() int32 {
 	return 0
 }
 
-// 增加计数器
+// Increment counter
 func Increment(value uint64) uint64 {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(ObjectID{})
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get default object failed: %v", err))
 		return 0
 	}
 
-	// 获取当前计数器值
+	// Get current counter value
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取计数器值失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get counter value failed: %v", err))
 		return 0
 	}
 
-	// 增加计数器值
+	// Increment counter value
 	newValue := currentValue + value
 
-	// 更新计数器值
+	// Update counter value
 	err = defaultObj.Set(CounterKey, newValue)
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("更新计数器值失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Update counter value failed: %v", err))
 		return 0
 	}
 
-	// 记录事件
+	// Record event
 	core.Log("increment",
 		"from", currentValue,
 		"add", value,
@@ -71,68 +71,68 @@ func Increment(value uint64) uint64 {
 	return newValue
 }
 
-// 获取计数器当前值
+// Get current counter value
 func GetCounter() uint64 {
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(ObjectID{})
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get default object failed: %v", err))
 		return 0
 	}
 
-	// 获取当前计数器值
+	// Get current counter value
 	var currentValue uint64
 	err = defaultObj.Get(CounterKey, &currentValue)
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取计数器值失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get counter value failed: %v", err))
 		return 0
 	}
 
 	return currentValue
 }
 
-// 重置计数器值为0
+// Reset counter value to 0
 func Reset() {
-	// 检查调用者是否为合约所有者
+	// Check if caller is contract owner
 	if core.Sender() != core.ContractAddress() {
-		core.Log("error", "message", "无权限重置计数器")
+		core.Log("error", "message", "No permission to reset counter")
 		return
 	}
 
-	// 获取默认Object
+	// Get default Object
 	defaultObj, err := core.GetObject(ObjectID{})
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("获取默认对象失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Get default object failed: %v", err))
 		return
 	}
 
-	// 重置计数器值为0
+	// Reset counter value to 0
 	err = defaultObj.Set(CounterKey, uint64(0))
 	if err != nil {
-		core.Log("error", "message", fmt.Sprintf("重置计数器值失败: %v", err))
+		core.Log("error", "message", fmt.Sprintf("Reset counter value failed: %v", err))
 		return
 	}
 
-	// 记录事件
+	// Record event
 	core.Log("reset", "sender", core.Sender())
 }
 
-// 初始化计数器函数
+// Initialize counter function
 func handleInitialize(params []byte) (any, error) {
 	fmt.Println("handleInitialize")
 
 	out := Initialize()
 
-	// 记录初始化事件
+	// Record initialization event
 	core.Log("CounterInitialized", "value", out)
 
-	// 返回成功结果
+	// Return success result
 	return out, nil
 }
 
-// 增加计数器函数
+// Increment counter function
 func handleIncrement(params []byte) (any, error) {
-	// 解析参数
+	// Parse parameters
 	var incrParams struct {
 		Amount int64 `json:"amount"`
 	}
@@ -143,37 +143,37 @@ func handleIncrement(params []byte) (any, error) {
 			return nil, fmt.Errorf("invalid increment parameters: %w", err)
 		}
 	} else {
-		// 默认增加1
+		// Default increment by 1
 		incrParams.Amount = 1
 	}
 
 	newValue := Increment(uint64(incrParams.Amount))
-	// 记录增加事件
+	// Record increment event
 	core.Log("CounterIncremented", "amount", incrParams.Amount, "new_value", newValue)
 
-	// 返回成功结果
+	// Return success result
 	return newValue, nil
 }
 
-// 获取计数器当前值
+// Get current counter value
 func handleGetCounter(params []byte) (any, error) {
 	value := GetCounter()
 
-	// 返回当前值
+	// Return current value
 	return value, nil
 }
 
-// 重置计数器函数
+// Reset counter function
 func handleReset(params []byte) (any, error) {
-	// 验证调用者权限
+	// Verify caller permissions
 	Reset()
-	// 返回成功结果
+	// Return success result
 	return nil, nil
 }
 
-// 注册合约函数
+// Register contract functions
 func init() {
-	// 注册计数器合约的函数处理器
+	// Register counter contract function handlers
 	registerContractFunction("Initialize", handleInitialize)
 	registerContractFunction("Increment", handleIncrement)
 	registerContractFunction("GetCounter", handleGetCounter)

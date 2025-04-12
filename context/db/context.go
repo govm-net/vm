@@ -409,11 +409,11 @@ func (c *Context) Call(caller core.Address, contract core.Address, function stri
 
 // Log implements types.BlockchainContext
 func (c *Context) Log(contract core.Address, eventName string, keyValues ...any) {
-	// 确保当前有区块和交易上下文
-	if c.currentBlock == nil || c.currentTx == nil {
-		slog.Error("Cannot log event without block and transaction context")
-		return
-	}
+	// Ensure there is current block and transaction context
+	// Encode keyValues as JSON
+	// Create event record
+	// Save to database
+	// Also output to log
 
 	// 将 keyValues 编码为 JSON
 	data, err := json.Marshal(keyValues)
@@ -424,8 +424,8 @@ func (c *Context) Log(contract core.Address, eventName string, keyValues ...any)
 
 	// 创建事件记录
 	event := &DBEvent{
-		BlockHeight: c.currentBlock.Height,
-		TxHash:      c.currentTx.Hash,
+		BlockHeight: c.BlockHeight(),
+		TxHash:      c.TransactionHash().String(),
 		Contract:    contract.String(),
 		EventName:   eventName,
 		KeyValues:   data,
@@ -439,8 +439,8 @@ func (c *Context) Log(contract core.Address, eventName string, keyValues ...any)
 
 	// 同时输出到日志
 	params := []any{
-		"block", c.currentBlock.Height,
-		"tx", c.currentTx.Hash,
+		"block", c.BlockHeight(),
+		"tx", c.TransactionHash(),
 		"contract", contract,
 		"event", eventName,
 	}

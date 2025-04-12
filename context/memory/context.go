@@ -5,39 +5,41 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/govm-net/vm/context"
 	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/types"
 )
 
-// defaultBlockchainContext 实现了默认的区块链上下文
+// defaultBlockchainContext implements the default blockchain context
 type defaultBlockchainContext struct {
-	// 区块信息
+	// Block information
 	blockHeight uint64
 	blockTime   int64
 
-	// 账户余额
+	// Account balances
 	balances map[types.Address]uint64
 
-	// 虚拟机对象存储
+	// Virtual machine object storage
 	objects        map[core.ObjectID]map[string][]byte
 	objectOwner    map[core.ObjectID]core.Address
 	objectContract map[core.ObjectID]core.Address
 
-	// 当前执行上下文
+	// Current execution context
 	contractAddr types.Address
 	sender       types.Address
 	txHash       core.Hash
 	nonce        uint64
 	gasLimit     int64
+	mu           sync.Mutex
 }
 
 func init() {
 	context.Register(context.MemoryContextType, NewBlockchainContext)
 }
 
-// NewDefaultBlockchainContext 创建一个新的简单区块链上下文
+// NewDefaultBlockchainContext creates a new simple blockchain context
 func NewBlockchainContext(params map[string]any) types.BlockchainContext {
 	return &defaultBlockchainContext{
 		blockHeight:    1,
@@ -76,33 +78,35 @@ func (ctx *defaultBlockchainContext) WithBlock(height uint64, time int64) types.
 	return ctx
 }
 
-// BlockHeight 获取当前区块高度
+// BlockHeight gets the current block height
 func (ctx *defaultBlockchainContext) BlockHeight() uint64 {
 	return ctx.blockHeight
 }
 
-// BlockTime 获取当前区块时间戳
+// BlockTime gets the current block timestamp
 func (ctx *defaultBlockchainContext) BlockTime() int64 {
 	return ctx.blockTime
 }
 
-// ContractAddress 获取当前合约地址
+// ContractAddress gets the current contract address
 func (ctx *defaultBlockchainContext) ContractAddress() types.Address {
 	return ctx.contractAddr
 }
 
-// TransactionHash 获取当前交易哈希
+// TransactionHash gets the current transaction hash
 func (ctx *defaultBlockchainContext) TransactionHash() core.Hash {
-	return core.Hash{} // 简化实现
+	return core.Hash{} // Simplified implementation
 }
 
-// Sender 获取交易发送者
+// Sender gets the transaction sender
 func (ctx *defaultBlockchainContext) Sender() types.Address {
 	return ctx.sender
 }
 
-// Balance 获取账户余额
+// Balance gets the account balance
 func (ctx *defaultBlockchainContext) Balance(addr types.Address) uint64 {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
 	return ctx.balances[addr]
 }
 
@@ -114,31 +118,35 @@ func (ctx *defaultBlockchainContext) GetGas() int64 {
 	return ctx.gasLimit
 }
 
-// Transfer 转账操作
+// Transfer transfers funds
 func (ctx *defaultBlockchainContext) Transfer(contract types.Address, from, to types.Address, amount uint64) error {
-	// 检查余额
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	// Check balance
 	fromBalance := ctx.balances[from]
 	if fromBalance < amount {
-		return errors.New("余额不足")
+		return errors.New("insufficient balance")
 	}
 
-	// 执行转账
+	// Execute transfer
 	ctx.balances[from] -= amount
 	ctx.balances[to] += amount
 	return nil
 }
 
-// CreateObject 创建新对象
+// CreateObject creates a new object
 func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types.VMObject, error) {
-	// 创建对象ID，简化版使用随机数
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	// Create object ID, simplified version using random number
 	id := ctx.generateObjectID(contract, ctx.sender)
 
-	// 创建对象存储
+	// Create object storage
 	ctx.objects[id] = make(map[string][]byte)
 	ctx.objectOwner[id] = ctx.Sender()
 	ctx.objectContract[id] = contract
 
-	// 返回对象封装
+	// Return object wrapper
 	return &vmObject{
 		ctx:         ctx,
 		objOwner:    ctx.Sender(),
@@ -147,14 +155,16 @@ func (ctx *defaultBlockchainContext) CreateObject(contract types.Address) (types
 	}, nil
 }
 
-// CreateObject 创建新对象
+// CreateObject creates a new object
 func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, id types.ObjectID) (types.VMObject, error) {
-	// 创建对象存储
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	// Create object storage
 	ctx.objects[id] = make(map[string][]byte)
 	ctx.objectOwner[id] = contract
 	ctx.objectContract[id] = contract
 
-	// 返回对象封装
+	// Return object wrapper
 	return &vmObject{
 		ctx:         ctx,
 		objOwner:    contract,
@@ -163,20 +173,24 @@ func (ctx *defaultBlockchainContext) CreateObjectWithID(contract types.Address, 
 	}, nil
 }
 
-// generateObjectID 生成一个新的对象ID
+// generateObjectID generates a new object ID
 func (ctx *defaultBlockchainContext) generateObjectID(contract types.Address, sender types.Address) core.ObjectID {
+	ctx.mu.Lock()
 	ctx.nonce++
+	ctx.mu.Unlock()
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%s-%s-%s-%d", contract, sender, ctx.txHash, ctx.nonce)))
 	var id core.ObjectID
 	copy(id[:], hash[:])
 	return id
 }
 
-// GetObject 获取指定对象
+// GetObject gets a specified object
 func (ctx *defaultBlockchainContext) GetObject(contract types.Address, id core.ObjectID) (types.VMObject, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
 	_, exists := ctx.objects[id]
 	if !exists {
-		return nil, errors.New("对象不存在")
+		return nil, errors.New("object does not exist")
 	}
 
 	return &vmObject{
@@ -187,8 +201,10 @@ func (ctx *defaultBlockchainContext) GetObject(contract types.Address, id core.O
 	}, nil
 }
 
-// GetObjectWithOwner 按所有者获取对象
+// GetObjectWithOwner gets objects by owner
 func (ctx *defaultBlockchainContext) GetObjectWithOwner(contract, owner types.Address) (types.VMObject, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
 	for id, objOwner := range ctx.objectOwner {
 		if objOwner == owner {
 			return &vmObject{
@@ -199,23 +215,25 @@ func (ctx *defaultBlockchainContext) GetObjectWithOwner(contract, owner types.Ad
 			}, nil
 		}
 	}
-	return nil, errors.New("未找到对象")
+	return nil, errors.New("object not found")
 }
 
-// DeleteObject 删除对象
+// DeleteObject deletes an object
 func (ctx *defaultBlockchainContext) DeleteObject(contract types.Address, id core.ObjectID) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
 	delete(ctx.objects, id)
 	delete(ctx.objectOwner, id)
 	delete(ctx.objectContract, id)
 	return nil
 }
 
-// Call 跨合约调用
+// Call cross-contract call
 func (ctx *defaultBlockchainContext) Call(caller types.Address, contract types.Address, function string, args ...any) ([]byte, error) {
 	return nil, errors.New("not implemented")
 }
 
-// Log 记录事件
+// Log records events
 func (ctx *defaultBlockchainContext) Log(contract types.Address, eventName string, keyValues ...any) {
 	params := []any{
 		"contract", contract,
@@ -242,7 +260,7 @@ func (ctx *defaultBlockchainContext) getObjectField(id core.ObjectID, field stri
 	return obj[field]
 }
 
-// vmObject 实现了对象接口
+// vmObject implements the object interface
 type vmObject struct {
 	ctx         *defaultBlockchainContext
 	objOwner    types.Address
@@ -250,23 +268,25 @@ type vmObject struct {
 	id          core.ObjectID
 }
 
-// ID 获取对象ID
+// ID gets the object ID
 func (o *vmObject) ID() core.ObjectID {
 	return o.id
 }
 
-// Owner 获取对象所有者
+// Owner gets the object owner
 func (o *vmObject) Owner() types.Address {
 	return o.objOwner
 }
 
-// Contract 获取对象所属合约
+// Contract gets the object's contract
 func (o *vmObject) Contract() types.Address {
 	return o.objContract
 }
 
-// SetOwner 设置对象所有者
+// SetOwner sets the object owner
 func (o *vmObject) SetOwner(contract, sender types.Address, addr types.Address) error {
+	o.ctx.mu.Lock()
+	defer o.ctx.mu.Unlock()
 	if contract != o.objContract {
 		return fmt.Errorf("invalid contract")
 	}
@@ -278,21 +298,25 @@ func (o *vmObject) SetOwner(contract, sender types.Address, addr types.Address) 
 	return nil
 }
 
-// Get 获取字段值
+// Get gets the field value
 func (o *vmObject) Get(contract types.Address, field string) ([]byte, error) {
+	o.ctx.mu.Lock()
+	defer o.ctx.mu.Unlock()
 	if contract != o.objContract {
 		return nil, fmt.Errorf("invalid contract")
 	}
 	fieldValue := o.ctx.getObjectField(o.id, field)
 	if fieldValue == nil {
-		return nil, errors.New("字段不存在")
+		return nil, errors.New("field does not exist")
 	}
 
 	return fieldValue, nil
 }
 
-// Set 设置字段值
+// Set sets the field value
 func (o *vmObject) Set(contract types.Address, sender types.Address, field string, value []byte) error {
+	o.ctx.mu.Lock()
+	defer o.ctx.mu.Unlock()
 	if contract != o.objContract {
 		return fmt.Errorf("invalid contract")
 	}

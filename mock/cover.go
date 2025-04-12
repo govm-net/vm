@@ -20,6 +20,48 @@ var (
 	GasConsumeGasFunc  = "ConsumeGas"
 )
 
+type CallTraceGenerator func(packageName, funcName string) []ast.Stmt
+
+var DefaultTraceGenerator CallTraceGenerator = func(packageName, funcName string) []ast.Stmt {
+	enterStmt := &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(GasPackageName),
+				Sel: ast.NewIdent("Enter"),
+			},
+			Args: []ast.Expr{
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: `core.AddressFromString("` + packageName + `")`,
+				},
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: `"` + funcName + `"`,
+				},
+			},
+		},
+	}
+	exitStmt := &ast.DeferStmt{
+		Call: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X:   ast.NewIdent(GasPackageName),
+				Sel: ast.NewIdent("Exit"),
+			},
+			Args: []ast.Expr{
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: `core.AddressFromString("` + packageName + `")`,
+				},
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: `"` + funcName + `"`,
+				},
+			},
+		},
+	}
+	return []ast.Stmt{enterStmt, exitStmt}
+}
+
 // AddMockEnterExit adds mock.Enter/Exit to exported functions
 func AddMockEnterExit(packageName string, code []byte) ([]byte, error) {
 	// Parse the code
@@ -60,45 +102,10 @@ func AddMockEnterExit(packageName string, code []byte) ([]byte, error) {
 			// Only process exported functions
 			if d.Recv == nil && ast.IsExported(d.Name.Name) {
 				// Create Enter/Exit statements
-				enterStmt := &ast.ExprStmt{
-					X: &ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent(GasPackageName),
-							Sel: ast.NewIdent("Enter"),
-						},
-						Args: []ast.Expr{
-							&ast.BasicLit{
-								Kind:  token.STRING,
-								Value: `core.AddressFromString("` + packageName + `")`,
-							},
-							&ast.BasicLit{
-								Kind:  token.STRING,
-								Value: `"` + d.Name.Name + `"`,
-							},
-						},
-					},
-				}
-				exitStmt := &ast.DeferStmt{
-					Call: &ast.CallExpr{
-						Fun: &ast.SelectorExpr{
-							X:   ast.NewIdent(GasPackageName),
-							Sel: ast.NewIdent("Exit"),
-						},
-						Args: []ast.Expr{
-							&ast.BasicLit{
-								Kind:  token.STRING,
-								Value: `core.AddressFromString("` + packageName + `")`,
-							},
-							&ast.BasicLit{
-								Kind:  token.STRING,
-								Value: `"` + d.Name.Name + `"`,
-							},
-						},
-					},
-				}
+				stmts := DefaultTraceGenerator(packageName, d.Name.Name)
 
 				// Add Enter and defer Exit at the beginning of the function
-				d.Body.List = append([]ast.Stmt{enterStmt, exitStmt}, d.Body.List...)
+				d.Body.List = append(stmts, d.Body.List...)
 			}
 		}
 		newFile.Decls = append(newFile.Decls, decl)
