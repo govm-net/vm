@@ -60,14 +60,20 @@ func GetHash(data []byte) Hash {
 	return Hash(sha256.Sum256(data))
 }
 
-func Assert(condition any) {
+func Assert(condition any, msgs ...any) {
 	switch v := condition.(type) {
 	case bool:
 		if !v {
+			if len(msgs) > 0 {
+				Log("assertion failed", msgs...)
+			}
 			panic("assertion failed")
 		}
 	case error:
 		if v != nil {
+			if len(msgs) > 0 {
+				Log(v.Error(), msgs...)
+			}
 			panic(v)
 		}
 	}
@@ -104,6 +110,15 @@ func Sender() Address {
 
 func Balance(addr Address) uint64 {
 	return ctx.Balance(addr)
+}
+
+// from sender to contract
+func Receive(amount uint64) error {
+	return ctx.Transfer(ctx.Sender(), ctx.ContractAddress(), amount)
+}
+
+func TransferTo(to Address, amount uint64) error {
+	return ctx.Transfer(ctx.ContractAddress(), to, amount)
 }
 
 // Object storage related - Basic state operations use panic instead of returning error

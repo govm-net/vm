@@ -1,290 +1,322 @@
-# GoVM - 基于WebAssembly的智能合约虚拟机
+# VM - WebAssembly-based Smart Contract Virtual Machine
 
-本项目是一个轻量级的、基于WebAssembly的智能合约虚拟机实现，允许用Go语言编写智能合约，并编译为WebAssembly运行。
+This project is a lightweight, WebAssembly-based smart contract virtual machine implementation that allows writing smart contracts in Go and compiling them to WebAssembly for execution.
 
-## 项目结构
+## Project Structure
 
 ```
 /
-├── cmd/                      # 命令行工具
-├── core/                     # 核心接口定义
-├── examples/                 # 示例代码
-│   ├── simple_contract/     # 简单的计数器合约示例
-│   ├── simple_demo/         # 演示如何使用MiniVM
-│   ├── counter/             # 计数器合约示例
-│   ├── token/               # 代币合约示例
-│   └── nft/                 # NFT合约示例
-├── vm/                       # 虚拟机实现
-│   ├── mini_vm.go           # 简化版虚拟机实现
-│   └── types.go             # 类型定义
-└── README.md                # 本文件
+├── abi/                      # ABI (Application Binary Interface) related code
+├── api/                      # Public API definitions
+├── compiler/                 # Contract compiler implementation
+│   ├── maker.go             # Contract maker implementation
+│   ├── testdata/            # Test data and examples
+│   └── wasm/                # WebAssembly related code
+├── context/                  # Execution context implementations
+│   ├── db/                  # Database-backed context
+│   └── memory/              # In-memory context
+├── core/                     # Core types and interfaces
+├── mock/                     # Mock implementations for testing
+├── repository/               # Code repository management
+├── types/                    # Type definitions
+├── vm/                       # Virtual machine implementation
+│   ├── engine.go            # Main engine implementation
+│   └── types.go             # Type definitions
+└── wasi/                     # WASI (WebAssembly System Interface) implementation
 ```
 
-## 特点
+## Features
 
-- 使用Go语言编写的WebAssembly虚拟机
-- 支持Go语言编写的智能合约
-- 基于WebAssembly的安全沙箱执行环境
-- 简单易用的合约API
-- 轻量级设计
+- WebAssembly virtual machine written in Go
+- Support for smart contracts written in Go
+- Secure sandbox execution environment based on WebAssembly
+- Simple and easy-to-use contract API
+- Multiple execution contexts (in-memory and database-backed)
+- Gas consumption tracking and management
+- Contract code repository with versioning
+- ABI support for contract interfaces
 
-## 依赖
+## Dependencies
 
 - Go 1.23+
-- TinyGo 0.37.0+（用于编译合约）
-- wazero（WebAssembly运行时）
+- TinyGo 0.37.0+ (for contract compilation)
+- wazero (WebAssembly runtime)
 
-## 安装
+## Installation
 
 ```bash
 go get github.com/govm-net/vm
 ```
 
-## 快速开始
+## Quick Start
 
-### 编写一个简单的计数器合约
+### Writing a Simple Counter Contract
 
 ```go
-// 简单计数器合约示例
-package main
+// Simple counter contract example
+package counter
 
 import (
-	"fmt"
+	"github.com/govm-net/vm/core"
 )
 
-// 全局计数器
-var counter uint64
+// State key for the counter contract
+const (
+	CounterKey = "counter_value"
+)
 
-// 入口函数：初始化合约
-//export Initialize
-func Initialize() {
-	counter = 0
-	fmt.Println("Counter initialized to 0")
+// Initialize the contract
+func Initialize() int32 {
+	// Get the contract's default Object
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
+
+	// Initialize counter value to 0
+	err = defaultObj.Set(CounterKey, uint64(0))
+	core.Assert(err)
+
+	core.Log("initialize", "contract_address", core.ContractAddress())
+	return 0
 }
 
-// 增加计数器值
-//export Increment
+// Increment counter value
 func Increment(value uint64) uint64 {
-	counter += value
-	fmt.Printf("Counter incremented by %d to %d\n", value, counter)
-	return counter
+	// Get default Object
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
+
+	// Get current counter value
+	var currentValue uint64
+	err = defaultObj.Get(CounterKey, &currentValue)
+	core.Assert(err)
+
+	// Increment counter value
+	newValue := currentValue + value
+
+	// Update counter value
+	err = defaultObj.Set(CounterKey, newValue)
+	core.Assert(err)
+
+	// Log event
+	core.Log("increment",
+		"from", currentValue,
+		"add", value,
+		"to", newValue,
+		"sender", core.Sender())
+
+	return newValue
 }
 
-// 获取当前计数器值
-//export GetCounter
+// Get current counter value
 func GetCounter() uint64 {
-	return counter
+	// Get default Object
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
+
+	// Get current counter value
+	var currentValue uint64
+	err = defaultObj.Get(CounterKey, &currentValue)
+	core.Assert(err)
+
+	return currentValue
 }
 
-// 重置计数器
-//export Reset
+// Reset counter
 func Reset() {
-	counter = 0
-	fmt.Println("Counter reset to 0")
-}
+	// Get default Object
+	defaultObj, err := core.GetObject(core.ObjectID{})
+	core.Assert(err)
 
-// WebAssembly要求main函数
-func main() {
-	// 此函数在WebAssembly中不会被执行
+	// Reset counter value to 0
+	err = defaultObj.Set(CounterKey, uint64(0))
+	core.Assert(err)
+
+	// Log event
+	core.Log("reset", "sender", core.Sender())
 }
 ```
 
-### 编译合约为WebAssembly
-
-```bash
-tinygo build -o contract.wasm -target wasi contract.go
-```
-
-### 使用MiniVM执行合约
+### Using the VM Engine
 
 ```go
 package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
-	"github.com/govm-net/vm/vm" // 引入vm包
+	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/vm"
 )
 
 func main() {
-	// 创建临时目录用于存储合约
-	tempDir, err := ioutil.TempDir("", "govm-demo")
-	if err != nil {
-		fmt.Printf("创建临时目录失败: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(tempDir) // 程序结束时清理
-
-	// 初始化虚拟机
-	miniVM, err := vm.NewMiniVM(tempDir)
-	if err != nil {
-		fmt.Printf("初始化虚拟机失败: %v\n", err)
-		os.Exit(1)
+	// Create configuration
+	config := &vm.Config{
+		MaxContractSize:  1024 * 1024, // 1MB
+		WASIContractsDir: "./contracts",
+		CodeManagerDir:   "./code",
+		ContextType:      "memory",
+		ContextParams:    make(map[string]any),
 	}
 
-	// 设置区块信息
-	miniVM.SetBlockInfo(100, 1624553600) // 区块高度100，时间戳
-
-	// 读取合约WASM文件
-	wasmPath := "contract.wasm"
-	wasmCode, err := ioutil.ReadFile(wasmPath)
+	// Create VM engine
+	engine, err := vm.NewEngine(config)
 	if err != nil {
-		fmt.Printf("读取WASM文件失败: %v\n", err)
+		fmt.Printf("Failed to create engine: %v\n", err)
 		os.Exit(1)
 	}
+	defer engine.Close()
 
-	// 部署合约
-	contractAddr, err := miniVM.DeployContract(wasmCode)
+	// Read contract source code
+	contractPath := "counter.go"
+	contractCode, err := os.ReadFile(contractPath)
 	if err != nil {
-		fmt.Printf("部署合约失败: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("合约已部署，地址: %s\n", contractAddr)
-
-	// 初始化合约
-	_, err = miniVM.ExecuteContract(contractAddr, "user1", "Initialize")
-	if err != nil {
-		fmt.Printf("初始化合约失败: %v\n", err)
+		fmt.Printf("Failed to read contract file: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 增加计数器
-	result, err := miniVM.ExecuteContract(contractAddr, "user1", "Increment", uint64(5))
+	// Deploy contract
+	contractAddr, err := engine.DeployContract(contractCode)
 	if err != nil {
-		fmt.Printf("调用Increment失败: %v\n", err)
+		fmt.Printf("Failed to deploy contract: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("当前计数器值: %v\n", result)
+	fmt.Printf("Contract deployed, address: %s\n", contractAddr)
+
+	// Initialize contract
+	_, err = engine.ExecuteContract(contractAddr, "Initialize")
+	if err != nil {
+		fmt.Printf("Failed to initialize contract: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Increment counter
+	result, err := engine.ExecuteContract(contractAddr, "Increment", uint64(5))
+	if err != nil {
+		fmt.Printf("Failed to call Increment: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Current counter value: %v\n", result)
 }
 ```
 
-## 虚拟机架构
+## Virtual Machine Architecture
 
-GoVM虚拟机的架构如下图所示：
+The VM architecture consists of several key components:
 
 ```mermaid
 graph TD
-    A[应用层] --> B[核心层]
-    B --> C[执行层]
-    C --> D[存储层]
+    A[Application Layer] --> B[Core Layer]
+    B --> C[Execution Layer]
+    C --> D[Storage Layer]
     
-    subgraph "应用层"
-    A1[智能合约] --> A2[DApp]
+    subgraph "Application Layer"
+    A1[Smart Contract] --> A2[DApp]
     end
     
-    subgraph "核心层"
-    B1[状态管理] --> B2[合约接口]
-    B2 --> B3[安全基础设施]
+    subgraph "Core Layer"
+    B1[State Management] --> B2[Contract Interface]
+    B2 --> B3[Security Infrastructure]
     end
     
-    subgraph "执行层"
-    C1[WebAssembly引擎] --> C2[宿主函数]
-    C2 --> C3[资源限制]
+    subgraph "Execution Layer"
+    C1[WebAssembly Engine] --> C2[Host Functions]
+    C2 --> C3[Resource Limits]
     end
     
-    subgraph "存储层"
-    D1[对象存储] --> D2[状态数据库]
+    subgraph "Storage Layer"
+    D1[Object Storage] --> D2[State Database]
     end
 ```
 
-## 系统组件
+## System Components
 
-### MiniVM
+### Engine
 
-`MiniVM` 是一个简化的虚拟机实现，用于演示和学习目的。它支持：
+The main VM engine (`vm.Engine`) provides:
 
-- 部署WebAssembly合约
-- 执行合约函数
-- 管理账户余额
-- 提供区块信息
+- Contract deployment and management
+- Contract execution
+- State management
+- Gas tracking
+- Multiple execution contexts
 
-### 状态管理
+### Context
 
-VM提供了简单的状态管理功能：
+Two types of execution contexts are supported:
 
-- 账户余额跟踪
-- 合约存储
-- 区块信息访问
+1. Memory Context (`context/memory`):
+   - In-memory state storage
+   - Fast execution
+   - Suitable for testing and development
 
-### WebAssembly执行环境
+2. Database Context (`context/db`):
+   - Persistent state storage
+   - Transaction support
+   - Suitable for production use
 
-基于wazero实现的WebAssembly执行环境，支持：
+### Contract Compiler
 
-- 加载并实例化WebAssembly模块
-- 提供宿主函数给合约调用
-- 资源限制（内存、执行时间）
+The contract compiler (`compiler/maker`) handles:
 
-## 合约开发指南
+- Contract validation
+- Code compilation to WebAssembly
+- ABI extraction
+- Gas injection
 
-### 导出函数
+### Repository
 
-使用`//export FunctionName`标记要导出的函数：
+The code repository (`repository`) manages:
+
+- Contract code storage
+- Version control
+- Code retrieval
+- Metadata management
+
+## Contract Development Guide
+
+### Package Structure
+
+Each contract should be defined in its own Go package. The package name will be used as the contract name. All public functions in the package will be automatically exported as contract functions.
 
 ```go
-//export Initialize
-func Initialize() {
-    // 初始化逻辑
+// counter.go
+package counter
+
+// Initialize will be exported as a contract function
+func Initialize() int32 {
+    // ...
+}
+
+// Increment will be exported as a contract function
+func Increment(value uint64) uint64 {
+    // ...
 }
 ```
 
-### 数据类型支持
+### Function Export
 
-WebAssembly支持的基本类型：
-
-- 整数：`int32`, `int64`, `uint32`, `uint64`
-- 浮点数：`float32`, `float64`
-- 内存访问：通过指针和长度
-
-### 宿主环境交互
-
-合约可以通过导入函数与宿主环境交互：
-
-- 获取区块信息：高度、时间戳
-- 账户操作：查询余额、转账
-- 存储操作：读写数据
-- 日志和事件：记录合约执行事件
-
-## 贡献指南
-
-欢迎贡献代码、报告问题或提出改进建议！请提交Pull Request或创建Issue。
-
-## 许可证
-
-本项目基于MIT许可证开源。
-
-## Function ID Constants
-
-To ensure consistency between the host environment and WebAssembly contract code, all function ID constants are defined in a single location in the `types` package. This helps prevent inconsistencies that could arise from separately defining these constants in different parts of the codebase.
-
-### Usage from Host Code
+Contract functions are automatically exported based on their visibility:
+- Public functions (capitalized) are exported as contract functions
+- Private functions (lowercase) are not exported
 
 ```go
-import (
-    "github.com/govm-net/vm/types"
-)
+// This function will be exported as a contract function
+func PublicFunction() {
+    // ...
+}
 
-// Convert to int32 for compatibility with existing code
-const (
-    FuncGetSender = int32(types.FuncGetSender)
-    // ... other constants
-)
+// This function will not be exported
+func privateFunction() {
+    // ...
+}
 ```
 
-### Usage from Contract Code
+## Contribution Guide
 
-```go
-import (
-    "github.com/govm-net/vm/types"
-)
+Contributions of code, bug reports, or improvement suggestions are welcome! Please submit a Pull Request or create an Issue.
 
-// Convert to int32 for use in contract code
-const (
-    FuncGetSender = int32(types.FuncGetSender)
-    // ... other constants
-)
-```
+## License
 
-This approach ensures that if a function ID needs to be added or modified, the change only needs to be made in one place, and all components of the system will automatically use the updated value.
+This project is open source under the MIT license.

@@ -14,34 +14,41 @@ import (
 	"github.com/govm-net/vm/mock"
 )
 
-// Manager 代码管理器
+// Manager represents a code manager
 type Manager struct {
-	rootDir string // 代码根目录
+	rootDir string // Root directory for code
 }
 
-// ContractCode 合约代码信息
+// ContractCode represents contract code information
 type ContractCode struct {
-	Address      core.Address // 合约地址
-	OriginalCode []byte       // 原始代码
-	InjectedCode []byte       // 注入gas信息后的代码
-	Dependencies []string     // 依赖的其他合约地址
-	UpdateTime   time.Time    // 最后更新时间
-	Hash         [32]byte     // 代码哈希
+	Address      core.Address // Contract address
+	OriginalCode []byte       // Original code
+	InjectedCode []byte       // Code after gas information injection
+	Dependencies []string     // Dependencies on other contract addresses
+	UpdateTime   time.Time    // Last update time
+	Hash         [32]byte     // Code hash
 }
 
-// ContractMetadata 合约元数据
+// ContractMetadata represents contract metadata
 type ContractMetadata struct {
-	Hash         string    `json:"hash"`         // 代码哈希
-	UpdateTime   time.Time `json:"update_time"`  // 更新时间
-	Dependencies []string  `json:"dependencies"` // 依赖列表
+	Hash         string    `json:"hash"`         // Code hash
+	UpdateTime   time.Time `json:"update_time"`  // Update time
+	Dependencies []string  `json:"dependencies"` // Dependency list
 }
 
-// NewManager 创建代码管理器
+// NewManager creates a new code manager
 func NewManager(rootDir string) (*Manager, error) {
-	// 确保根目录存在
-	if err := os.MkdirAll(rootDir, 0755); err != nil {
-		slog.Error("failed to create root directory", "dir", rootDir, "error", err)
-		return nil, fmt.Errorf("failed to create root directory: %w", err)
+	if rootDir == "" {
+		tempDir, err := os.MkdirTemp("", "code-manager-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		}
+		rootDir = tempDir
+	} else {
+		if err := os.MkdirAll(rootDir, 0755); err != nil {
+			slog.Error("failed to create root directory", "dir", rootDir, "error", err)
+			return nil, fmt.Errorf("failed to create root directory: %w", err)
+		}
 	}
 
 	return &Manager{
@@ -49,10 +56,9 @@ func NewManager(rootDir string) (*Manager, error) {
 	}, nil
 }
 
-// RegisterCode 注册新的合约代码
+// RegisterCode registers new contract code
 func (m *Manager) RegisterCode(address core.Address, code []byte) error {
-
-	// 检查合约是否已存在
+	// Check if contract already exists
 	contractDir := m.getContractDir(address)
 	if _, err := os.Stat(contractDir); err == nil {
 		return fmt.Errorf("contract already exists: %s", address)
@@ -60,23 +66,23 @@ func (m *Manager) RegisterCode(address core.Address, code []byte) error {
 		return fmt.Errorf("failed to check contract directory: %w", err)
 	}
 
-	// 计算代码哈希
+	// Calculate code hash
 	hash := sha256.Sum256(code)
 
-	// 创建合约目录
+	// Create contract directory
 	if err := os.MkdirAll(contractDir, 0755); err != nil {
 		return fmt.Errorf("failed to create contract directory: %w", err)
 	}
 
-	// 注入gas计费代码
+	// Inject gas consumption code
 	injectedCode, err := mock.AddGasConsumption(address.String(), code)
 	if err != nil {
-		// 删除已创建的目录
+		// Delete created directory
 		os.RemoveAll(contractDir)
 		return fmt.Errorf("failed to inject gas consumption: %w", err)
 	}
 
-	// 创建ContractCode对象
+	// Create ContractCode object
 	contractCode := &ContractCode{
 		Address:      address,
 		OriginalCode: code,
@@ -85,9 +91,9 @@ func (m *Manager) RegisterCode(address core.Address, code []byte) error {
 		Hash:         hash,
 	}
 
-	// 保存代码文件
+	// Save code files
 	if err := m.saveContractFiles(contractCode); err != nil {
-		// 删除已创建的目录
+		// Delete created directory
 		os.RemoveAll(contractDir)
 		return fmt.Errorf("failed to save contract files: %w", err)
 	}
@@ -95,12 +101,12 @@ func (m *Manager) RegisterCode(address core.Address, code []byte) error {
 	return nil
 }
 
-// GetCode 获取合约代码
+// GetCode retrieves contract code
 func (m *Manager) GetCode(address core.Address) (*ContractCode, error) {
 	return m.loadContractCode(address)
 }
 
-// GetInjectedCode 获取注入gas信息后的代码
+// GetInjectedCode retrieves code after gas information injection
 func (m *Manager) GetInjectedCode(address core.Address) ([]byte, error) {
 	code, err := m.GetCode(address)
 	if err != nil {
@@ -109,39 +115,39 @@ func (m *Manager) GetInjectedCode(address core.Address) ([]byte, error) {
 	return code.InjectedCode, nil
 }
 
-// getContractDir 获取合约目录路径
+// getContractDir gets the contract directory path
 func (m *Manager) getContractDir(address core.Address) string {
 	return filepath.Join(m.rootDir, address.String())
 }
 
-// saveContractFiles 保存合约相关文件
+// saveContractFiles saves contract related files
 func (m *Manager) saveContractFiles(code *ContractCode) error {
 	dir := m.getContractDir(code.Address)
 
-	// 保存原始代码
+	// Save original code
 	if err := os.WriteFile(filepath.Join(dir, "original.go.txt"), code.OriginalCode, 0644); err != nil {
 		return fmt.Errorf("failed to save original code: %w", err)
 	}
 
-	// 保存注入gas后的代码
+	// Save code after gas injection
 	if err := os.WriteFile(filepath.Join(dir, "injected.go"), code.InjectedCode, 0644); err != nil {
 		return fmt.Errorf("failed to save injected code: %w", err)
 	}
 
-	// 创建元数据
+	// Create metadata
 	metadata := ContractMetadata{
 		Hash:         hex.EncodeToString(code.Hash[:]),
 		UpdateTime:   code.UpdateTime,
 		Dependencies: code.Dependencies,
 	}
 
-	// 序列化元数据为JSON
+	// Serialize metadata to JSON
 	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// 保存元数据
+	// Save metadata
 	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), metadataBytes, 0644); err != nil {
 		return fmt.Errorf("failed to save metadata: %w", err)
 	}
@@ -149,35 +155,35 @@ func (m *Manager) saveContractFiles(code *ContractCode) error {
 	return nil
 }
 
-// loadContractCode 从文件系统加载合约代码
+// loadContractCode loads contract code from filesystem
 func (m *Manager) loadContractCode(address core.Address) (*ContractCode, error) {
 	dir := m.getContractDir(address)
 
-	// 读取原始代码
+	// Read original code
 	originalCode, err := os.ReadFile(filepath.Join(dir, "original.go.txt"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read original code: %w", err)
 	}
 
-	// 读取注入gas后的代码
+	// Read code after gas injection
 	injectedCode, err := os.ReadFile(filepath.Join(dir, "injected.go"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read injected code: %w", err)
 	}
 
-	// 读取元数据
+	// Read metadata
 	metadataBytes, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
 
-	// 解析元数据
+	// Parse metadata
 	var metadata ContractMetadata
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
-	// 解析哈希
+	// Parse hash
 	hashBytes, err := hex.DecodeString(metadata.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("invalid hash in metadata: %w", err)

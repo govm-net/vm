@@ -2,7 +2,6 @@ package wasi
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	api1 "github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/core"
 	"github.com/govm-net/vm/types"
 	"github.com/tetratelabs/wazero"
@@ -18,32 +18,32 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
-// WazeroVM 使用wazero实现的虚拟机
+// WazeroVM implements a virtual machine using wazero
 type WazeroVM struct {
-	// 存储已部署合约的映射表
+	// Map of deployed contracts
 	// contracts     map[types.Address][]byte
 	contractsLock sync.RWMutex
 
-	// 合约存储目录
+	// Contract storage directory
 	contractDir string
 
-	// wazero运行时
+	// wazero runtime
 	ctx context.Context
 
-	// env模块
+	// env module
 	envModule api.Module
 }
 
-// NewWazeroVM 创建一个新的wazero虚拟机实例
+// NewWazeroVM creates a new wazero virtual machine instance
 func NewWazeroVM(contractDir string) (*WazeroVM, error) {
-	// 确保合约目录存在
+	// Ensure contract directory exists
 	if contractDir != "" {
 		if err := os.MkdirAll(contractDir, 0755); err != nil {
-			return nil, fmt.Errorf("创建合约目录失败: %w", err)
+			return nil, fmt.Errorf("failed to create contract directory: %w", err)
 		}
 	}
 
-	// 创建wazero运行时
+	// Create wazero runtime
 	ctx := context.Background()
 
 	vm := &WazeroVM{
@@ -55,21 +55,21 @@ func NewWazeroVM(contractDir string) (*WazeroVM, error) {
 	return vm, nil
 }
 
-// DeployContract 部署新的WebAssembly合约
+// DeployContract deploys a new WebAssembly contract
 func (vm *WazeroVM) DeployContract(ctx types.BlockchainContext, wasmCode []byte, sender types.Address) (types.Address, error) {
-	// 生成合约地址
-	contractAddr := vm.generateContractAddress(wasmCode, sender)
+	// Generate contract address
+	contractAddr := api1.DefaultContractAddressGenerator(wasmCode, sender)
 	return vm.DeployContractWithAddress(ctx, wasmCode, sender, contractAddr)
 }
 
-// DeployContractWithAddress 部署新的WebAssembly合约
+// DeployContractWithAddress deploys a new WebAssembly contract with specified address
 func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmCode []byte, sender types.Address, contractAddr types.Address) (types.Address, error) {
-	// 验证WASM代码
+	// Verify WASM code
 	if len(wasmCode) == 0 {
-		return types.Address{}, errors.New("合约代码不能为空")
+		return types.Address{}, errors.New("contract code cannot be empty")
 	}
 
-	// 存储合约代码
+	// Store contract code
 	// vm.contractsLock.Lock()
 	// vm.contracts[contractAddr] = wasmCode
 	// vm.contractsLock.Unlock()
@@ -77,22 +77,22 @@ func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmC
 	copy(id[:], contractAddr[:])
 	ctx.CreateObjectWithID(contractAddr, id)
 
-	// 如果指定了合约目录，则保存到文件
+	// If contract directory is specified, save to file
 	if vm.contractDir != "" {
 		contractPath := filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)+".wasm")
 		if err := os.WriteFile(contractPath, wasmCode, 0644); err != nil {
-			return types.Address{}, fmt.Errorf("存储合约代码失败: %w", err)
+			return types.Address{}, fmt.Errorf("failed to store contract code: %w", err)
 		}
 	}
 
 	return contractAddr, nil
 }
 
-// DeleteContract 删除WebAssembly合约
+// DeleteContract deletes a WebAssembly contract
 func (vm *WazeroVM) DeleteContract(ctx types.BlockchainContext, contractAddr types.Address) {
 	vm.contractsLock.Lock()
 	defer vm.contractsLock.Unlock()
-	// 从合约映射中删除
+	// Delete from contract map
 	// delete(vm.contracts, contractAddr)
 	os.RemoveAll(filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)))
 }
@@ -101,28 +101,28 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (
 	ctx1 := context.Background()
 	runtime := wazero.NewRuntime(ctx1)
 
-	// 编译WASM模块
+	// Compile WASM module
 	compiled, err := runtime.CompileModule(ctx1, wasmCode)
 	if err != nil {
-		return nil, fmt.Errorf("编译WebAssembly模块失败: %w", err)
+		return nil, fmt.Errorf("failed to compile WebAssembly module: %w", err)
 	}
 
-	// 创建导入对象
+	// Create import object
 	builder := runtime.NewHostModuleBuilder("env")
 
-	// 添加内存
+	// Add memory
 	builder.NewFunctionBuilder().
 		WithFunc(func() uint32 {
 			return 0
 		}).Export("memory")
 
-	// 添加宿主函数
+	// Add host functions
 	builder.NewFunctionBuilder().
 		WithParameterNames("funcID", "argPtr", "argLen", "bufferPtr").
 		WithResultNames("result").
 		WithFunc(func(_ context.Context, m api.Module, funcID, argPtr, argLen, bufferPtr uint32) int32 {
-			fmt.Printf("call_host_set: %d, %d, %d, %d\n", funcID, argPtr, argLen, bufferPtr)
-			// 读取参数数据
+			// fmt.Printf("call_host_set: %d, %d, %d, %d\n", funcID, argPtr, argLen, bufferPtr)
+			// Read parameter data
 			mem := m.Memory()
 			if mem == nil {
 				return 0
@@ -140,7 +140,7 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (
 		WithParameterNames("funcID", "argPtr", "argLen", "buffer").
 		WithResultNames("result").
 		WithFunc(func(_ context.Context, m api.Module, funcID, argPtr, argLen, buffer uint32) int32 {
-			fmt.Printf("call_host_get_buffer: %d, %d, %d, %d\n", funcID, argPtr, argLen, buffer)
+			// fmt.Printf("call_host_get_buffer: %d, %d, %d, %d\n", funcID, argPtr, argLen, buffer)
 			// 读取参数数据
 			mem := m.Memory()
 			if mem == nil {
@@ -191,47 +191,46 @@ func (vm *WazeroVM) initContract(ctx types.BlockchainContext, wasmCode []byte) (
 		}).
 		Export("get_balance")
 
-	// 实例化导入对象
+	// Initialize WASI
 	envModule, err := builder.Instantiate(vm.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("实例化导入对象失败: %w", err)
 	}
 	vm.envModule = envModule
 
-	// 初始化WASI
 	wasi_snapshot_preview1.MustInstantiate(vm.ctx, runtime)
 
-	// 创建模块配置
+	// Create module configuration
 	config := wazero.NewModuleConfig().
 		WithName("contract").WithStdout(os.Stdout).WithStderr(os.Stderr)
 
-	// 实例化模块
+	// Instantiate module
 	module, err := runtime.InstantiateModule(ctx1, compiled, config.WithStartFunctions("_initialize"))
 	if err != nil {
-		fmt.Printf("实例化模块失败: %v\n", err)
-		return nil, fmt.Errorf("实例化模块失败: %w", err)
+		fmt.Printf("failed to instantiate module: %v\n", err)
+		return nil, fmt.Errorf("failed to instantiate module: %w", err)
 	}
 	return module, nil
 }
 
-// ExecuteContract 执行已部署的合约函数
+// ExecuteContract executes a deployed contract function
 func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr types.Address, functionName string, params []byte) (interface{}, error) {
-	// 检查合约是否存在
+	// Check if contract exists
 	// vm.contractsLock.RLock()
 	// wasmCode, exists := vm.contracts[contractAddr]
 	// vm.contractsLock.RUnlock()
 
 	// if !exists {
-	// 	return nil, fmt.Errorf("合约不存在: %x", contractAddr)
+	// 	return nil, fmt.Errorf("contract does not exist: %x", contractAddr)
 	// }
 	wasmCode, err := os.ReadFile(filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)+".wasm"))
 	if err != nil {
-		return nil, fmt.Errorf("读取合约代码失败: %w", err)
+		return nil, fmt.Errorf("failed to read contract code: %w", err)
 	}
 
 	module, err := vm.initContract(ctx, wasmCode)
 	if err != nil {
-		return types.Address{}, fmt.Errorf("实例化WebAssembly模块失败: %w", err)
+		return types.Address{}, fmt.Errorf("failed to instantiate WebAssembly module: %w", err)
 	}
 
 	result, err := vm.callWasmFunction(ctx, module, functionName, params, contractAddr)
@@ -244,32 +243,24 @@ func (vm *WazeroVM) ExecuteContract(ctx types.BlockchainContext, contractAddr ty
 	var runResult types.ExecutionResult
 	err = json.Unmarshal(result, &runResult)
 	if err != nil {
-		return nil, fmt.Errorf("反序列化失败: %w", err)
+		return nil, fmt.Errorf("failed to deserialize: %w", err)
 	}
 	return runResult.Data, nil
 }
 
-// generateContractAddress 生成合约地址
-func (vm *WazeroVM) generateContractAddress(code []byte, _ types.Address) types.Address {
-	var addr types.Address
-	hash := sha256.Sum256(code)
-	copy(addr[:], hash[:])
-	return addr
-}
-
-// callWasmFunction 调用WASM函数
+// callWasmFunction calls a WASM function
 func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Module, functionName string, params []byte, contractAddr types.Address) ([]byte, error) {
-	fmt.Printf("调用合约函数:%s, %v\n", functionName, string(params))
+	// fmt.Printf("calling contract function:%s, %v\n", functionName, string(params))
 
-	// 检查是否导出了allocate和deallocate函数
+	// Check if allocate and deallocate functions are exported
 	allocate := module.ExportedFunction("allocate")
 	if allocate == nil {
-		return nil, fmt.Errorf("没有allocate函数")
+		return nil, fmt.Errorf("allocate function not found")
 	}
 
 	processDataFunc := module.ExportedFunction("handle_contract_call")
 	if processDataFunc == nil {
-		return nil, fmt.Errorf("handle_contract_call没找到")
+		return nil, fmt.Errorf("handle_contract_call not found")
 	}
 
 	var input types.HandleContractCallParams
@@ -278,28 +269,28 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	input.Function = functionName
 	input.Args = params
 	input.GasLimit = ctx.GetGas()
-	fmt.Println("[host]handle_contract_call gasLimit", input.GasLimit)
+	// fmt.Println("[host]handle_contract_call gasLimit", input.GasLimit)
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
-		return nil, fmt.Errorf("handle_contract_call 序列化失败: %w", err)
+		return nil, fmt.Errorf("failed to serialize handle_contract_call: %w", err)
 	}
 
-	// 分配内存并写入参数
+	// Allocate memory and write parameters
 	result, err := allocate.Call(vm.ctx, uint64(len(inputBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("内存分配失败: %w", err)
+		return nil, fmt.Errorf("failed to allocate memory: %w", err)
 	}
 	inputAddr := uint32(result[0])
 
-	// 写入参数数据
+	// Write parameter data
 	if !module.Memory().Write(inputAddr, inputBytes) {
-		return nil, fmt.Errorf("写入内存失败")
+		return nil, fmt.Errorf("failed to write to memory")
 	}
 
-	// 调用处理函数
+	// Call processing function
 	result, err = processDataFunc.Call(vm.ctx, uint64(inputAddr), uint64(len(inputBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("执行%s失败: %w", functionName, err)
+		return nil, fmt.Errorf("failed to execute %s: %w", functionName, err)
 	}
 
 	var out []byte
@@ -310,47 +301,47 @@ func (vm *WazeroVM) callWasmFunction(ctx types.BlockchainContext, module api.Mod
 	if resultLen > 0 {
 		getBufferAddress := module.ExportedFunction("get_buffer_address")
 		if getBufferAddress == nil {
-			return nil, fmt.Errorf("没有get_buffer_address函数")
+			return nil, fmt.Errorf("get_buffer_address function not found")
 		}
 
 		result, err = getBufferAddress.Call(vm.ctx)
 		if err != nil {
-			return nil, fmt.Errorf("get_buffer_address失败: %w", err)
+			return nil, fmt.Errorf("get_buffer_address failed: %w", err)
 		}
 		bufferPtr := uint32(result[0])
 
-		// 读取结果数据
+		// Read result data
 		data, ok := module.Memory().Read(bufferPtr, uint32(resultLen))
 		if !ok {
-			return nil, fmt.Errorf("读取内存失败:%d, len:%d", bufferPtr, resultLen)
+			return nil, fmt.Errorf("failed to read memory:%d, len:%d", bufferPtr, resultLen)
 		}
 		out = data
 	}
 
-	// 释放内存
+	// Free memory
 	deallocate := module.ExportedFunction("deallocate")
 	if deallocate == nil {
-		return nil, fmt.Errorf("没有deallocate函数")
+		return nil, fmt.Errorf("deallocate function not found")
 	}
 	_, err = deallocate.Call(vm.ctx, uint64(inputAddr), uint64(len(inputBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("释放内存失败: %w", err)
+		return nil, fmt.Errorf("failed to free memory: %w", err)
 	}
 
-	fmt.Printf("执行结束:%s, %v\n", functionName, resultLen)
+	// fmt.Printf("execution completed:%s, %v\n", functionName, resultLen)
 	return out, nil
 }
 
-// 宿主函数处理器
+// Host function handler
 func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, funcID uint32, argData []byte, bufferPtr uint32) int32 {
-	// 根据函数ID处理不同的操作
+	// Process different operations based on function ID
 	switch types.WasmFunctionID(funcID) {
 	case types.FuncTransfer:
 		var params types.TransferParams
 		if err := json.Unmarshal(argData, &params); err != nil {
 			return -1
 		}
-		err := ctx.Transfer(params.From, params.To, params.Amount)
+		err := ctx.Transfer(params.Contract, params.From, params.To, params.Amount)
 		if err != nil {
 			return -1
 		}
@@ -426,7 +417,7 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 	case types.FuncSetObjectField:
 		var params types.SetObjectFieldParams
 		if err := json.Unmarshal(argData, &params); err != nil {
-			slog.Error("set_object_field 反序列化失败", "error", err)
+			slog.Error("failed to deserialize set_object_field", "error", err)
 			return -1
 		}
 		if params.ID == (types.ObjectID{}) {
@@ -434,23 +425,23 @@ func (vm *WazeroVM) handleHostSet(ctx types.BlockchainContext, m api.Module, fun
 		}
 		obj, err := ctx.GetObject(params.Contract, params.ID)
 		if err != nil {
-			slog.Error("set_object_field 获取对象失败", "error", err)
+			slog.Error("failed to get object in set_object_field", "error", err)
 			return -1
 		}
 		if obj.Owner() != params.Contract {
-			slog.Error("set_object_field 对象所有者不匹配", "contract", params.Contract, "owner", obj.Owner())
+			slog.Error("object owner mismatch in set_object_field", "contract", params.Contract, "owner", obj.Owner())
 			return -1
 		}
-		// 将value转换为[]byte
+		// Convert value to []byte
 		valueBytes, err := json.Marshal(params.Value)
 		if err != nil {
-			slog.Error("set_object_field 序列化失败", "error", err)
+			slog.Error("failed to serialize in set_object_field", "error", err)
 			return -1
 		}
-		slog.Info("---set_object_field", "field", params.Field, "value", params.Value, "string", valueBytes, "len", len(valueBytes))
+		// slog.Info("---set_object_field", "field", params.Field, "value", params.Value, "string", valueBytes, "len", len(valueBytes))
 		err = obj.Set(params.Contract, params.Sender, params.Field, valueBytes)
 		if err != nil {
-			slog.Error("set_object_field 设置字段失败", "error", err)
+			slog.Error("failed to set field in set_object_field", "error", err)
 			return -1
 		}
 		return 0
@@ -465,7 +456,7 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 	if mem == nil {
 		return -1
 	}
-	// 根据函数ID处理不同的操作
+	// Process different operations based on function ID
 	switch types.WasmFunctionID(funcID) {
 	case types.FuncGetSender:
 		sender := ctx.Sender()
@@ -489,7 +480,7 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 	case types.FuncGetObjectField:
 		var params types.GetObjectFieldParams
 		if err := json.Unmarshal(argData, &params); err != nil {
-			fmt.Printf("obj.getfield 反序列化失败: %v\n", err)
+			fmt.Printf("failed to deserialize obj.getfield: %v\n", err)
 			return -1
 		}
 		if params.ID == (types.ObjectID{}) {
@@ -497,16 +488,16 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 		}
 		obj, err := ctx.GetObject(params.Contract, params.ID)
 		if err != nil {
-			fmt.Printf("obj.getfield 获取对象失败:id:%x, %v\n", params.ID, err)
+			fmt.Printf("failed to get object in obj.getfield:id:%x, %v\n", params.ID, err)
 			return -1
 		}
 		data, err := obj.Get(params.Contract, params.Field)
 		if err != nil {
-			fmt.Printf("obj.getfield 获取字段失败:id:%x, %v\n", params.ID, err)
+			fmt.Printf("failed to get field in obj.getfield:id:%x, %v\n", params.ID, err)
 			return -1
 		}
 		mem.Write(offset, data)
-		slog.Info("obj.getfield", "id", params.ID, "field", params.Field, "value", string(data))
+		// slog.Info("obj.getfield", "id", params.ID, "field", params.Field, "value", string(data))
 		return int32(len(data))
 
 	case types.FuncGetObject:
@@ -560,7 +551,7 @@ func (vm *WazeroVM) handleHostGetBuffer(ctx types.BlockchainContext, m api.Modul
 	}
 }
 
-// Close 关闭虚拟机
+// Close closes the virtual machine
 func (vm *WazeroVM) Close() error {
 	if vm.envModule != nil {
 		if err := vm.envModule.Close(vm.ctx); err != nil {

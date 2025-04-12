@@ -1,19 +1,20 @@
-// Simple counter contract example based on wasm wrapper layer
-package testdata
+// A simple counter contract example based on WASM wrapper
+package countercontract
 
 import (
 	"github.com/govm-net/vm/core"
 )
 
-// Counter contract state key
+// State key for the counter contract
 const (
 	CounterKey = "counter_value"
 )
 
-// Initialize contract
-// This function starts with uppercase, so it will be automatically exported and called when the contract is deployed
+// Initialize the contract
+// This function starts with a capital letter, so it will be automatically exported
+// and called when the contract is deployed
 func Initialize() int32 {
-	// Get contract's default Object (empty ObjectID)
+	// Get the contract's default Object (empty ObjectID)
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
 
@@ -25,7 +26,7 @@ func Initialize() int32 {
 	return 0
 }
 
-// Increment counter
+// Increment the counter
 func Increment(value uint64) uint64 {
 	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
@@ -43,7 +44,7 @@ func Increment(value uint64) uint64 {
 	err = defaultObj.Set(CounterKey, newValue)
 	core.Assert(err)
 
-	// Record event
+	// Log event
 	core.Log("increment",
 		"from", currentValue,
 		"add", value,
@@ -53,7 +54,7 @@ func Increment(value uint64) uint64 {
 	return newValue
 }
 
-// Get current counter value
+// GetCounter returns the current counter value
 func GetCounter() uint64 {
 	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
@@ -67,13 +68,8 @@ func GetCounter() uint64 {
 	return currentValue
 }
 
-// Reset counter value to 0
+// Reset sets the counter value back to 0
 func Reset() {
-	// Check if caller is contract owner
-	if core.Sender() != core.ContractAddress() {
-		return
-	}
-
 	// Get default Object
 	defaultObj, err := core.GetObject(core.ObjectID{})
 	core.Assert(err)
@@ -82,6 +78,6 @@ func Reset() {
 	err = defaultObj.Set(CounterKey, uint64(0))
 	core.Assert(err)
 
-	// Record event
+	// Log event
 	core.Log("reset", "sender", core.Sender())
 }

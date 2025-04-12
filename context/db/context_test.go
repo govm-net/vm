@@ -86,7 +86,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(0), ctx.Balance(addr2))
 
 	// 测试转账
-	err := ctx.Transfer(addr1, addr2, 500)
+	err := ctx.Transfer(core.ZeroAddress, addr1, addr2, 500)
 	require.NoError(t, err)
 
 	// 验证转账结果
@@ -94,7 +94,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(500), ctx.Balance(addr2))
 
 	// 测试余额不足
-	err = ctx.Transfer(addr1, addr2, 1000)
+	err = ctx.Transfer(core.ZeroAddress, addr1, addr2, 1000)
 	assert.Error(t, err)
 }
 
@@ -160,11 +160,8 @@ func TestEventLogging(t *testing.T) {
 	require.NoError(t, ctx.db.Create(block).Error)
 	ctx.currentBlock = block
 
-	tx := &DBTransaction{
-		Hash: "0xtx",
-	}
-	require.NoError(t, ctx.db.Create(tx).Error)
-	ctx.currentTx = tx
+	tx := core.HashFromString("0x124578")
+	ctx.SetTransactionInfo(tx, core.ZeroAddress, core.ZeroAddress, 1000)
 
 	contract := core.AddressFromString("0xcontract")
 
@@ -181,7 +178,7 @@ func TestEventLogging(t *testing.T) {
 	require.NoError(t, result.Error)
 
 	assert.Equal(t, uint64(100), event.BlockHeight)
-	assert.Equal(t, "0xtx", event.TxHash)
+	assert.Equal(t, tx.String(), event.TxHash)
 	assert.Equal(t, contract.String(), event.Contract)
 	assert.Equal(t, "TestEvent", event.EventName)
 

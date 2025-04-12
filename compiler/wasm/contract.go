@@ -1,5 +1,5 @@
-// WebAssembly 合约通信包装层
-// 为智能合约提供与主机环境通信的标准接口
+// WebAssembly Contract Communication Wrapper Layer
+// Provides standard interfaces for smart contracts to communicate with the host environment
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/govm-net/vm/types"
 )
 
-// 导入函数ID常量 - 从types包导入以确保一致性
+// Import function ID constants - imported from types package to ensure consistency
 const (
 	FuncGetSender          = int32(types.FuncGetSender)
 	FuncGetContractAddress = int32(types.FuncGetContractAddress)
@@ -31,21 +31,21 @@ const (
 	FuncGetObjectContract  = int32(types.FuncGetObjectContract)
 )
 
-// 定义全局接收数据缓冲区的大小
+// Define the size of the global receive data buffer
 const HostBufferSize int32 = types.HostBufferSize
 
-// 使用全局变量存储动态分配的主机缓冲区地址
+// Use global variables to store dynamically allocated host buffer address
 var hostBufferPtr int32 = 0
 var hostBuffer []byte
 
-// 定义基本类型
+// Define basic types
 type Address = core.Address
 type ObjectID = core.ObjectID
 
-// ZeroAddress 表示空地址
+// ZeroAddress represents an empty address
 var ZeroAddress Address
 
-// Context 实现智能合约执行上下文接口
+// Context implements the smart contract execution context interface
 type Context struct {
 	sender          Address
 	blockHeight     uint64
@@ -53,7 +53,7 @@ type Context struct {
 	contractAddress Address
 }
 
-// Object 实现状态对象接口
+// Object implements the state object interface
 type Object struct {
 	id ObjectID
 }
@@ -61,18 +61,18 @@ type Object struct {
 var _ types.Context = &Context{}
 var _ core.Object = &Object{}
 
-// 从主机环境导入的函数 - 这些函数由主机环境提供
+// Functions imported from the host environment - these functions are provided by the host environment
 
 func init() {
 	hostBuffer = make([]byte, HostBufferSize)
 	hostBufferPtr = int32(uintptr(unsafe.Pointer(&hostBuffer[0])))
 
-	// 限制只使用一个协程
+	// Limit to using only one goroutine
 	runtime.GOMAXPROCS(1)
 
-	// 注册合约中的函数
+	// Register contract functions
 	// registerContractFunction("Transfer", handleTransfer)
-	// 其他函数注册可以添加在这里
+	// Other function registrations can be added here
 }
 
 //go:wasmimport env call_host_set
@@ -83,7 +83,7 @@ func call_host_set(funcID, argPtr, argLen, bufferPtr int32) int32
 //export call_host_get_buffer
 func call_host_get_buffer(funcID, argPtr, argLen, bufferPtr int32) int32
 
-// 一些常用的直接导出函数，提供性能优化
+// Some commonly used direct export functions for performance optimization
 
 //go:wasmimport env get_block_height
 //export get_block_height
@@ -102,7 +102,7 @@ func get_buffer_address() int32 {
 	return hostBufferPtr
 }
 
-// 辅助函数 - 与主机环境通信的核心处理函数
+// Helper functions - core processing functions for communication with the host environment
 func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, errCode int32) {
 	var argPtr int32 = 0
 	var argLen int32 = 0
@@ -110,25 +110,25 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 		panic(fmt.Sprintf("data length %d is too long, max is %d", len(data), HostBufferSize))
 	}
 
-	fmt.Println("[wasm]--callHost", funcID, string(data))
+	// fmt.Println("[wasm]--callHost", funcID, string(data))
 	if len(data) > 0 {
-		// 获取参数数据的指针和长度
+		// Get pointer and length of parameter data
 		copy(hostBuffer[:len(data)], data)
 		argPtr = hostBufferPtr
 		argLen = int32(len(data))
 	}
 
-	// 根据函数ID选择合适的调用方式
+	// Choose appropriate calling method based on function ID
 	switch funcID {
-	// 需要通过缓冲区返回复杂数据的函数
+	// Functions that need to return complex data through buffer
 	case FuncGetSender, FuncGetContractAddress, FuncCall,
 		FuncGetObject, FuncGetObjectWithOwner, FuncCreateObject,
 		FuncGetObjectOwner, FuncGetObjectField:
 
-		// 使用获取缓冲区数据的宿主函数（返回数据大小）
+		// Use host function to get buffer data (returns data size)
 		resultSize = call_host_get_buffer(funcID, argPtr, argLen, hostBufferPtr)
 		if resultSize > 0 {
-			// 数据已存储在全局缓冲区
+			// Data is stored in global buffer
 			resultPtr = hostBufferPtr
 			errCode = 0
 		} else if resultSize == 0 {
@@ -137,9 +137,9 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 			errCode = resultSize
 		}
 
-	// 不需要返回数据的函数或返回简单值的函数
+	// Functions that don't need to return data or return simple values
 	default:
-		// 使用设置数据的宿主函数
+		// Use host function to set data
 		resultSize = call_host_set(funcID, argPtr, argLen, hostBufferPtr)
 		if resultSize >= 0 {
 			resultPtr = hostBufferPtr
@@ -152,17 +152,17 @@ func callHost(funcID int32, data []byte) (resultPtr int32, resultSize int32, err
 	return resultPtr, resultSize, errCode
 }
 
-// 从内存读取数据
+// Read data from memory
 func readMemory(ptr, size int32) []byte {
-	// 安全性检查
+	// Safety check
 	if ptr == 0 || size <= 0 {
 		return []byte{}
 	}
 
-	// 创建结果数组
+	// Create result array
 	data := make([]byte, size)
 
-	// 从指定位置读取数据
+	// Read data from specified location
 	for i := int32(0); i < size; i++ {
 		data[i] = *(*byte)(unsafe.Pointer(uintptr(ptr) + uintptr(i)))
 	}
@@ -170,7 +170,7 @@ func readMemory(ptr, size int32) []byte {
 	return data
 }
 
-// 将数据写入内存
+// Convert data to bytes
 func any2bytes(data any) (bytes []byte, err error) {
 	switch v := data.(type) {
 	case string:
@@ -187,7 +187,7 @@ func any2bytes(data any) (bytes []byte, err error) {
 	return bytes, nil
 }
 
-// 将数据写入内存
+// Write data to memory
 func writeToMemory(data any) (ptr int32, size int32, err error) {
 	bytes, err := any2bytes(data)
 	if err != nil {
@@ -199,9 +199,9 @@ func writeToMemory(data any) (ptr int32, size int32, err error) {
 	return ptr, size, nil
 }
 
-// Context 接口实现
+// Context interface implementation
 
-// Sender 返回调用合约的账户地址
+// Sender returns the account address that called the contract
 func (c *Context) Sender() Address {
 	mock.ConsumeGas(10)
 	addr := mock.GetCaller()
@@ -211,7 +211,7 @@ func (c *Context) Sender() Address {
 	if c.sender != ZeroAddress {
 		return c.sender
 	}
-	// 调用宿主函数，使用常量FuncGetSender
+	// Call host function using FuncGetSender constant
 	ptr, size, _ := callHost(FuncGetSender, nil)
 	data := readMemory(ptr, size)
 	copy(addr[:], data)
@@ -219,31 +219,31 @@ func (c *Context) Sender() Address {
 	return addr
 }
 
-// BlockHeight 返回当前区块高度
+// BlockHeight returns the current block height
 func (c *Context) BlockHeight() uint64 {
 	mock.ConsumeGas(10)
 	if c.blockHeight != 0 {
 		return c.blockHeight
 	}
-	// 直接调用宿主函数，无需经过callHost中转
+	// Directly call host function without going through callHost
 	value := get_block_height()
 	c.blockHeight = uint64(value)
 	return uint64(value)
 }
 
-// BlockTime 返回当前区块时间戳
+// BlockTime returns the current block timestamp
 func (c *Context) BlockTime() int64 {
 	mock.ConsumeGas(10)
 	if c.blockTime != 0 {
 		return c.blockTime
 	}
-	// 直接调用宿主函数，无需经过callHost中转
+	// Directly call host function without going through callHost
 	value := get_block_time()
 	c.blockTime = value
 	return value
 }
 
-// ContractAddress 返回当前合约地址
+// ContractAddress returns the current contract address
 func (c *Context) ContractAddress() Address {
 	mock.ConsumeGas(10)
 	addr := mock.GetCurrentContract()
@@ -253,7 +253,7 @@ func (c *Context) ContractAddress() Address {
 	if c.contractAddress != ZeroAddress {
 		return c.contractAddress
 	}
-	// 调用宿主函数，使用常量FuncGetContractAddress
+	// Call host function using FuncGetContractAddress constant
 	ptr, size, _ := callHost(FuncGetContractAddress, nil)
 	data := readMemory(ptr, size)
 
@@ -262,20 +262,21 @@ func (c *Context) ContractAddress() Address {
 	return addr
 }
 
-// Balance 返回指定地址的余额
+// Balance returns the balance of the specified address
 func (c *Context) Balance(addr Address) uint64 {
 	mock.ConsumeGas(50)
-	// 直接调用宿主函数
+	// Directly call host function
 	return get_balance(int32(uintptr(unsafe.Pointer(&addr[0]))))
 }
 
-// Transfer 从合约转账到指定地址
-func (c *Context) Transfer(to Address, amount uint64) error {
+// Transfer transfers tokens from the contract to the specified address
+func (c *Context) Transfer(from Address, to Address, amount uint64) error {
 	mock.ConsumeGas(500)
 	data := types.TransferParams{
-		From:   c.ContractAddress(),
-		To:     to,
-		Amount: amount,
+		Contract: c.ContractAddress(),
+		From:     from,
+		To:       to,
+		Amount:   amount,
 	}
 
 	buff, err := any2bytes(data)
@@ -283,7 +284,7 @@ func (c *Context) Transfer(to Address, amount uint64) error {
 		return fmt.Errorf("failed to serialize transfer data: %w", err)
 	}
 
-	// 调用宿主函数，使用常量FuncTransfer
+	// Call host function using FuncTransfer constant
 	_, _, result := callHost(FuncTransfer, buff)
 	if result != 0 {
 		return fmt.Errorf("transfer failed with code: %d", result)
@@ -291,25 +292,25 @@ func (c *Context) Transfer(to Address, amount uint64) error {
 	return nil
 }
 
-// Call 调用另一个合约的函数
+// Call calls a function on another contract
 func (c *Context) Call(contract Address, function string, args ...any) ([]byte, error) {
 	mock.ConsumeGas(10000)
-	// 构造调用参数
+	// Construct call parameters
 	callData := types.CallParams{
 		Contract: contract,
 		Function: function,
 		Args:     args,
-		Caller:   c.ContractAddress(), // 当前合约作为调用者
+		Caller:   c.ContractAddress(), // Current contract as caller
 		GasLimit: mock.GetGas() - 10000,
 	}
 
-	// 序列化调用参数
+	// Serialize call parameters
 	bytes, err := any2bytes(callData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize call data: %w", err)
 	}
 
-	// 调用主机函数
+	// Call host function
 	resultPtr, resultSize, errCode := callHost(FuncCall, bytes)
 	if errCode != 0 {
 		return nil, fmt.Errorf("contract call failed with code: %d", errCode)
@@ -320,52 +321,52 @@ func (c *Context) Call(contract Address, function string, args ...any) ([]byte, 
 	if err := json.Unmarshal(data, &callResult); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal call result: %w", err)
 	}
-	//扣除实际使用的gas
+	// Deduct actual gas used
 	mock.ConsumeGas(callResult.GasUsed)
 
-	// 读取返回数据
+	// Read return data
 	return callResult.Data, nil
 }
 
-// CreateObject 创建一个新的状态对象
+// CreateObject creates a new state object
 func (c *Context) CreateObject() core.Object {
 	mock.ConsumeGas(500)
 	address := c.ContractAddress()
-	// 调用宿主函数，创建对象并获取对象ID
+	// Call host function to create object and get object ID
 	ptr, size, errCode := callHost(FuncCreateObject, address[:])
 	if errCode != 0 {
 		panic(fmt.Sprintf("failed to create object with code: %d", errCode))
 	}
 
-	// 解析对象ID
+	// Parse object ID
 	idData := readMemory(ptr, size)
 	var id ObjectID
 	copy(id[:], idData)
 
-	// 返回对象包装器
+	// Return object wrapper
 	return &Object{id: id}
 }
 
-// GetObject 获取指定ID的状态对象
+// GetObject retrieves a state object by ID
 func (c *Context) GetObject(id ObjectID) (core.Object, error) {
 	mock.ConsumeGas(50)
 	var request types.GetObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
 
-	// 将对象ID序列化
+	// Serialize object ID
 	bytes, err := any2bytes(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize object ID: %w", err)
 	}
 
-	// 调用宿主函数
+	// Call host function
 	_, resultSize, errCode := callHost(FuncGetObject, bytes)
 	if errCode != 0 {
 		return nil, fmt.Errorf("failed to get object with code: %d", errCode)
 	}
 
-	// 解析对象数据
+	// Parse object data
 	if resultSize == 0 {
 		return nil, fmt.Errorf("object not found")
 	}
@@ -373,26 +374,26 @@ func (c *Context) GetObject(id ObjectID) (core.Object, error) {
 	return &Object{id: id}, nil
 }
 
-// GetObjectWithOwner 获取指定所有者的状态对象
+// GetObjectWithOwner retrieves a state object by owner
 func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
 	mock.ConsumeGas(50)
 	var request types.GetObjectWithOwnerParams
 	request.Contract = c.ContractAddress()
 	request.Owner = owner
 
-	// 将所有者地址序列化
+	// Serialize owner address
 	bytes, err := any2bytes(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize owner address: %w", err)
 	}
 
-	// 调用宿主函数
+	// Call host function
 	resultPtr, resultSize, errCode := callHost(FuncGetObjectWithOwner, bytes)
 	if errCode != 0 {
 		return nil, fmt.Errorf("failed to get object with code: %d", errCode)
 	}
 
-	// 解析对象ID
+	// Parse object ID
 	if resultSize == 0 {
 		return nil, fmt.Errorf("object not found")
 	}
@@ -404,20 +405,20 @@ func (c *Context) GetObjectWithOwner(owner Address) (core.Object, error) {
 	return &Object{id: id}, nil
 }
 
-// DeleteObject 删除指定ID的状态对象
+// DeleteObject deletes a state object by ID
 func (c *Context) DeleteObject(id ObjectID) {
 	mock.ConsumeGas(500)
 	var request types.DeleteObjectParams
 	request.Contract = c.ContractAddress()
 	request.ID = id
 
-	// 序列化
+	// Serialize
 	bytes, err := any2bytes(request)
 	if err != nil {
 		panic(fmt.Sprintf("failed to serialize object ID: %v", err))
 	}
 
-	// 调用宿主函数
+	// Call host function
 	_, _, errCode := callHost(FuncDeleteObject, bytes)
 	if errCode != 0 {
 		panic(fmt.Sprintf("failed to delete object with code: %d", errCode))
@@ -425,7 +426,7 @@ func (c *Context) DeleteObject(id ObjectID) {
 	mock.RefundGas(800)
 }
 
-// Log 记录事件
+// Log records an event
 func (c *Context) Log(event string, keyValues ...any) {
 	mock.ConsumeGas(100)
 	var request types.LogParams
@@ -433,41 +434,41 @@ func (c *Context) Log(event string, keyValues ...any) {
 	request.Event = event
 	request.KeyValues = keyValues
 
-	// 将请求序列化
+	// Serialize request
 	bytes, err := any2bytes(request)
 	if err != nil {
 		panic(fmt.Sprintf("failed to serialize log request: %v", err))
 	}
 	mock.ConsumeGas(int64(len(bytes)))
 
-	// 调用宿主函数 - 忽略返回值，只关心发送日志操作
+	// Call host function - ignore return value, only care about sending log operation
 	_, _, _ = callHost(FuncLog, bytes)
 }
 
-// Object 接口实现
+// Object interface implementation
 
-// ID 返回对象的唯一标识符
+// ID returns the unique identifier of the object
 func (o *Object) ID() ObjectID {
 	mock.ConsumeGas(10)
 	return o.id
 }
 
-// Owner 返回对象的所有者地址
+// Owner returns the owner address of the object
 func (o *Object) Owner() Address {
 	mock.ConsumeGas(100)
-	// 将对象ID序列化
+	// Serialize object ID
 	bytes, err := any2bytes(o.id)
 	if err != nil {
 		return ZeroAddress
 	}
 
-	// 调用宿主函数
+	// Call host function
 	resultPtr, resultSize, _ := callHost(FuncGetObjectOwner, bytes)
 	if resultSize == 0 {
 		return ZeroAddress
 	}
 
-	// 解析所有者地址
+	// Parse owner address
 	ownerData := readMemory(resultPtr, resultSize)
 	var owner Address
 	copy(owner[:], ownerData)
@@ -475,10 +476,10 @@ func (o *Object) Owner() Address {
 	return owner
 }
 
-// SetOwner 设置对象的所有者
+// SetOwner sets the owner of the object
 func (o *Object) SetOwner(owner Address) {
 	mock.ConsumeGas(500)
-	// 构造参数
+	// Construct parameters
 	request := types.SetOwnerParams{
 		Contract: mock.GetCurrentContract(),
 		Sender:   mock.GetCaller(),
@@ -486,47 +487,47 @@ func (o *Object) SetOwner(owner Address) {
 		Owner:    owner,
 	}
 
-	// 序列化参数
+	// Serialize parameters
 	bytes, err := any2bytes(request)
 	if err != nil {
 		panic(fmt.Sprintf("failed to serialize data: %v", err))
 	}
 
-	// 调用宿主函数
+	// Call host function
 	_, _, errCode := callHost(FuncSetObjectOwner, bytes)
 	if errCode != 0 {
 		panic(fmt.Sprintf("set owner failed with code: %d", errCode))
 	}
 }
 
-// Get 获取对象字段的值
+// Get retrieves the value of an object field
 func (o *Object) Get(field string, value any) error {
 	mock.ConsumeGas(100)
-	// 构造参数
+	// Construct parameters
 	getData := types.GetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
 		ID:       o.id,
 		Field:    field,
 	}
 
-	// 序列化参数
+	// Serialize parameters
 	bytes, err := any2bytes(getData)
 	if err != nil {
 		return fmt.Errorf("failed to serialize data: %w", err)
 	}
 
-	// 调用宿主函数
+	// Call host function
 	resultPtr, resultSize, errCode := callHost(FuncGetObjectField, bytes)
 	if errCode != 0 {
 		return fmt.Errorf("get field failed with code: %d", errCode)
 	}
 
-	// 解析字段值
+	// Parse field value
 	if resultSize == 0 {
 		return fmt.Errorf("field not found")
 	}
 
-	// 读取字段数据
+	// Read field data
 	fieldData := readMemory(resultPtr, resultSize)
 	mock.ConsumeGas(int64(resultSize))
 	if err := json.Unmarshal(fieldData, value); err != nil {
@@ -536,10 +537,10 @@ func (o *Object) Get(field string, value any) error {
 	return nil
 }
 
-// Set 设置对象字段的值
+// Set sets the value of an object field
 func (o *Object) Set(field string, value any) error {
 	mock.ConsumeGas(1000)
-	// 构造参数
+	// Construct parameters
 	request := types.SetObjectFieldParams{
 		Contract: mock.GetCurrentContract(),
 		Sender:   mock.GetCaller(),
@@ -548,14 +549,14 @@ func (o *Object) Set(field string, value any) error {
 		Value:    value,
 	}
 
-	// 序列化参数
+	// Serialize parameters
 	bytes, err := any2bytes(request)
 	if err != nil {
 		return fmt.Errorf("failed to serialize data: %w", err)
 	}
 	mock.ConsumeGas(int64(len(bytes)) * 100)
 
-	// 调用宿主函数
+	// Call host function
 	_, _, errCode := callHost(FuncSetObjectField, bytes)
 	if errCode != 0 {
 		return fmt.Errorf("set field failed with code: %d", errCode)
@@ -566,17 +567,17 @@ func (o *Object) Set(field string, value any) error {
 
 func (o *Object) Contract() Address {
 	mock.ConsumeGas(100)
-	// 调用宿主函数
+	// Call host function
 	resultPtr, resultSize, errCode := callHost(FuncGetObjectContract, o.id[:])
 	if errCode != 0 {
 		return ZeroAddress
 	}
-	// 解析字段值
+	// Parse field value
 	if resultSize == 0 {
 		return ZeroAddress
 	}
 
-	// 读取字段数据
+	// Read field data
 	fieldData := readMemory(resultPtr, resultSize)
 
 	var contract Address
@@ -584,110 +585,110 @@ func (o *Object) Contract() Address {
 	return contract
 }
 
-// 内存管理函数 - 供主机环境使用
+// Memory management functions - for host environment use
 
 //export allocate
 func allocate(size int32) int32 {
-	// 分配指定大小的内存
+	// Allocate memory of specified size
 	buffer := make([]byte, size)
-	// 返回内存地址
+	// Return memory address
 	return int32(uintptr(unsafe.Pointer(&buffer[0])))
 }
 
 //export deallocate
 func deallocate(ptr int32, size int32) {
-	// 在Go中，内存由GC管理，无需手动释放
-	// 这个函数只是为了符合WASM接口要求
+	// In Go, memory is managed by GC, no need for manual deallocation
+	// This function is only to comply with WASM interface requirements
 }
 
-// 错误码常量
+// Error code constants
 const (
-	// 成功
+	// Success
 	ErrorCodeSuccess int32 = 0
-	// 函数未找到
+	// Function not found
 	ErrorCodeFunctionNotFound int32 = -1
-	// 参数解析错误
+	// Parameter parsing error
 	ErrorCodeInvalidParams int32 = -2
-	// 执行错误
+	// Execution error
 	ErrorCodeExecutionError int32 = -3
-	// 执行错误
+	// Execution error
 	ErrorCodeExecutionPanic int32 = -4
 )
 
-// 全局错误消息
+// Global error message
 var lastErrorMessage string
 
-// 合约函数处理器类型
+// Contract function handler type
 type ContractFunctionHandler func(params []byte) (any, error)
 
-// 合约函数处理表，将在初始化时填充
+// Contract function dispatch table, will be populated during initialization
 var contractFunctions = map[string]ContractFunctionHandler{}
 
-// 合约函数注册器，用于将合约函数处理器添加到分发表中
+// Contract function registrar, used to add contract function handlers to the dispatch table
 func registerContractFunction(name string, handler ContractFunctionHandler) {
 	contractFunctions[name] = handler
 }
 
-// 统一合约入口函数
-// 参数:
-// - funcNamePtr: 函数名的内存指针
-// - funcNameLen: 函数名的长度
-// - paramsPtr: 参数的内存指针
-// - paramsLen: 参数的长度
-// 返回值:
-// - 结果指针或错误码
+// Unified contract entry function
+// Parameters:
+// - funcNamePtr: Memory pointer to function name
+// - funcNameLen: Length of function name
+// - paramsPtr: Memory pointer to parameters
+// - paramsLen: Length of parameters
+// Return value:
+// - Result pointer or error code
 //
 //export handle_contract_call
 func handle_contract_call(inputPtr, inputLen int32) (code int32) {
-	fmt.Println("handle_contract_call", inputPtr, inputLen)
+	// fmt.Println("handle_contract_call", inputPtr, inputLen)
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("handle_contract_call panic")
 			code = ErrorCodeExecutionPanic
 		}
 	}()
-	// 读取函数名
+	// Read function name
 	inputBytes := readMemory(inputPtr, inputLen)
 	var input types.HandleContractCallParams
 	if err := json.Unmarshal(inputBytes, &input); err != nil {
 		return ErrorCodeInvalidParams
 	}
 	functionName := input.Function
-	fmt.Println("handle_contract_call gasLimit", input.GasLimit)
+	// fmt.Println("handle_contract_call gasLimit", input.GasLimit)
 	if input.GasLimit > 0 {
 		mock.ResetGas(input.GasLimit)
 	}
 
-	fmt.Println("handle_contract_call functionName", functionName, string(input.Args))
+	// fmt.Println("handle_contract_call functionName", functionName, string(input.Args))
 
-	// 读取参数
+	// Read parameters
 	paramsBytes := input.Args
-	mock.Enter(input.Sender, "handle_contract_call")
-	mock.Enter(input.Contract, functionName)
+	mock.Enter(input.Sender.String(), "handle_contract_call")
+	mock.Enter(input.Contract.String(), functionName)
 
-	// 使用mock模块记录函数进入
+	// Use mock module to record function entry
 	ctx := &Context{}
 
-	// 获取处理函数
+	// Get handler function
 	handler, exists := contractFunctions[functionName]
 	if !exists {
-		// 函数未找到
+		// Function not found
 		errMsg := fmt.Sprintf("Function not found: %s", functionName)
 		fmt.Println(errMsg)
 
-		// 返回错误结果
+		// Return error result
 		result := types.ExecutionResult{
 			Success: false,
 			Error:   errMsg,
 		}
 
-		// 序列化结果
+		// Serialize result
 		resultBytes, err := any2bytes(result)
 		if err != nil {
 			return ErrorCodeExecutionError
 		}
 
-		// 写入全局缓冲区
+		// Write to global buffer
 		if hostBufferPtr != 0 && len(resultBytes) <= len(hostBuffer) {
 			copy(hostBuffer[:len(resultBytes)], resultBytes)
 			return int32(len(resultBytes))
@@ -696,29 +697,29 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 		return ErrorCodeFunctionNotFound
 	}
 
-	fmt.Println("handler, exists", handler, exists)
+	// fmt.Println("handler, exists", handler, exists)
 	core.SetContext(ctx)
 
-	// 执行处理函数
+	// Execute handler function
 	data, err := handler(paramsBytes)
 	if err != nil {
-		// 执行出错
+		// Execution error
 		errMsg := fmt.Sprintf("Execution error: %v", err)
 		fmt.Println(errMsg)
 
-		// 返回错误结果
+		// Return error result
 		result := types.ExecutionResult{
 			Success: false,
 			Error:   errMsg,
 		}
 
-		// 序列化结果
+		// Serialize result
 		resultPtr, resultSize, err := writeToMemory(result)
 		if err != nil {
 			return ErrorCodeExecutionError
 		}
 
-		// 写入全局缓冲区
+		// Write to global buffer
 		if hostBufferPtr != 0 && resultSize <= HostBufferSize {
 			copy(hostBuffer[:resultSize], readMemory(resultPtr, resultSize))
 			return resultSize
@@ -727,31 +728,31 @@ func handle_contract_call(inputPtr, inputLen int32) (code int32) {
 		return ErrorCodeExecutionError
 	}
 
-	// 成功执行
+	// Successful execution
 	result := types.ExecutionResult{
 		Success: true,
 		Data:    data,
 	}
-	fmt.Println("contract result", result)
+	// fmt.Println("contract result", result)
 
-	// 序列化结果
+	// Serialize result
 	resultPtr, resultSize, err := writeToMemory(result)
 	if err != nil {
 		fmt.Println("Failed to serialize result: ", err)
 		return ErrorCodeExecutionError
 	}
 
-	// 写入全局缓冲区
+	// Write to global buffer
 	if hostBufferPtr != 0 && resultSize <= HostBufferSize {
 		copy(hostBuffer[:resultSize], readMemory(resultPtr, resultSize))
 		return resultSize
 	}
 
-	// 直接返回结果指针（如果缓冲区不可用）
+	// Directly return result pointer (if buffer is not available)
 	return resultPtr
 }
 
-// WebAssembly 要求 main 函数
+// WebAssembly requires a main function
 func main() {
-	// 此函数在 WebAssembly 中不会被执行
+	// This function will not be executed in WebAssembly
 }

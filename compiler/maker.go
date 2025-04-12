@@ -75,7 +75,8 @@ var RestrictedCommentPrefixes []string = []string{
 
 func init() {
 
-	// 预处理限制的注释前缀
+	// Preprocess restricted comment prefixes
+	// Remove "//" or "// " from prefix for comparison
 	rawPrefixes := RestrictedCommentPrefixes
 
 	RestrictedCommentPrefixes = make([]string, len(rawPrefixes))
@@ -139,29 +140,29 @@ func (m *Maker) ValidateContract(code []byte) error {
 		return errors.New("contract must have at least one exported (public) function")
 	}
 
-	// 创建临时目录进行编译验证
+	// Create temporary directory for compilation verification
 	tmpDir, err := os.MkdirTemp("", "vm-contract-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// 创建源代码目录
+	// Create source code directory
 	srcDir := tmpDir
 
-	// 写入合约代码
+	// Write contract code
 	contractFile := filepath.Join(srcDir, "contract.go")
 	if err := os.WriteFile(contractFile, code, 0644); err != nil {
 		return fmt.Errorf("failed to write contract code: %w", err)
 	}
 
-	// 创建 go.mod 文件
+	// Create go.mod file
 	goModContent := api.DefaultGoModGenerator(file.Name.Name, nil, nil)
 
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return fmt.Errorf("failed to write go.mod: %w", err)
 	}
-	// 尝试编译代码
+	// Try to compile code
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = tmpDir
 	// cmd.Env = append(os.Environ(), "GOPATH="+tmpDir)
@@ -170,7 +171,7 @@ func (m *Maker) ValidateContract(code []byte) error {
 		return fmt.Errorf("go mod tidy failed: %s\nOutput: %s", err, string(output))
 	}
 
-	// 尝试编译代码
+	// Try to compile code
 	cmd = exec.Command("go", "build", "-v", "./")
 	cmd.Dir = tmpDir
 	// cmd.Env = append(os.Environ(), "GOPATH="+tmpDir)
@@ -238,16 +239,16 @@ func (v *restrictedKeywordVisitor) Visit(node ast.Node) ast.Visitor {
 // validateNoMaliciousCommands ensures the contract doesn't contain malicious commands in comments.
 func (m *Maker) validateNoMaliciousCommands(file *ast.File) error {
 	fset := token.NewFileSet()
-	// 检查所有注释
+	// Check all comments
 	for _, commentGroup := range file.Comments {
 		for _, comment := range commentGroup.List {
-			// 移除注释标记
+			// Remove comment markers
 			commentText := strings.TrimPrefix(comment.Text, "//")
 			commentText = strings.TrimPrefix(commentText, "/*")
 			commentText = strings.TrimSuffix(commentText, "*/")
 			commentText = strings.TrimSpace(commentText)
 
-			// 检查每一行
+			// Check each line
 			for _, line := range strings.Split(commentText, "\n") {
 				line = strings.TrimSpace(line)
 				if line == "" {
@@ -266,17 +267,17 @@ func (m *Maker) validateNoMaliciousCommands(file *ast.File) error {
 
 // CompileContract compiles the given contract source code.
 func (m *Maker) CompileContract(code []byte) ([]byte, error) {
-	// 1. 提取代码的abi
+	// 1. Extract code ABI
 	abiInfo, err := abi.ExtractABI(code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract ABI: %w", err)
 	}
-	//如果函数个数为0，则返回错误
+	// Return error if no functions found
 	if len(abiInfo.Functions) == 0 {
 		return nil, errors.New("contract must have at least one exported (public) function")
 	}
 
-	// 2. 创建临时目录
+	// 2. Create temporary directory
 	var tmpDir string
 	if true {
 		tmpDir, err = os.MkdirTemp("", "vm-contract-*")
@@ -289,7 +290,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		os.MkdirAll(tmpDir, 0755)
 	}
 
-	// 3. 将代码放到临时文件夹，并修改包名为main
+	// 3. Place code in temporary folder and change package name to main
 	contractCode := string(code)
 	contractCode = strings.Replace(contractCode, "package "+abiInfo.PackageName, "package main", 1)
 	contractFile := filepath.Join(tmpDir, "source.go")
@@ -297,18 +298,18 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write contract code: %w", err)
 	}
 
-	// 4. 生成handle函数
+	// 4. Generate handler functions
 	handlerGenerator := abi.NewHandlerGenerator(abiInfo)
 	handlerCode := handlerGenerator.GenerateHandlers()
 
-	// 修改生成的代码，使用 main 包
+	// Modify generated code to use main package
 	handlerCode = strings.Replace(handlerCode, "package "+abiInfo.PackageName, "package main", 1)
 
-	// 修改合约代码，使用 main 包
+	// Modify contract code to use main package
 	contractCode = string(code)
 	contractCode = strings.Replace(contractCode, "package "+abiInfo.PackageName, "package main", 1)
 
-	// 写入修改后的合约代码
+	// Write modified contract code
 	if err := os.WriteFile(contractFile, []byte(contractCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write contract code: %w", err)
 	}
@@ -318,7 +319,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write handler code: %w", err)
 	}
 
-	// 修改contract.go，添加handler函数的注册
+	// Modify contract.go to add handler function registration
 	registerCode := "\nfunc init() {\n"
 	for _, fn := range abiInfo.Functions {
 		registerCode += fmt.Sprintf("\tregisterContractFunction(\"%s\", handle%s)\n", fn.Name, fn.Name)
@@ -330,13 +331,13 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write modified contract.go: %w", err)
 	}
 
-	// 创建 go.mod 文件
+	// Create go.mod file
 	goModContent := api.DefaultGoModGenerator("main", nil, nil)
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write go.mod: %w", err)
 	}
 
-	// 运行 go mod tidy
+	// Run go mod tidy
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = tmpDir
 	output, err := cmd.CombinedOutput()
@@ -344,7 +345,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("go mod tidy failed: %s\nOutput: %s", err, string(output))
 	}
 
-	// 6. 使用tinygo编译
+	// 6. Compile with tinygo
 	cmd = exec.Command(api.Builder, api.BuildParams...)
 	cmd.Dir = tmpDir
 	output, err = cmd.CombinedOutput()
@@ -352,7 +353,7 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 		return nil, fmt.Errorf("tinygo build failed: %s\nOutput: %s", err, string(output))
 	}
 
-	// 读取编译后的wasm文件
+	// Read compiled wasm file
 	wasmFile := filepath.Join(tmpDir, "contract.wasm")
 	wasmCode, err := os.ReadFile(wasmFile)
 	if err != nil {
@@ -360,79 +361,4 @@ func (m *Maker) CompileContract(code []byte) ([]byte, error) {
 	}
 
 	return wasmCode, nil
-}
-
-// FunctionInfo 函数信息
-type FunctionInfo struct {
-	Name string
-	Args []struct {
-		Name string
-		Type string
-	}
-}
-
-// ParseABI 解析合约代码获取函数信息
-func (m *Maker) ParseABI(code []byte) (map[string]FunctionInfo, error) {
-	// 创建文件集
-	fset := token.NewFileSet()
-
-	// 解析Go代码
-	file, err := parser.ParseFile(fset, "", code, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse contract code: %w", err)
-	}
-
-	// 存储函数信息
-	abi := make(map[string]FunctionInfo)
-
-	// 遍历所有声明
-	for _, decl := range file.Decls {
-		// 只处理函数声明
-		funcDecl, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-
-		// 跳过未导出的函数
-		if !funcDecl.Name.IsExported() {
-			continue
-		}
-
-		// 创建函数信息
-		info := FunctionInfo{
-			Name: funcDecl.Name.Name,
-		}
-
-		// 处理函数参数
-		if funcDecl.Type.Params != nil {
-			for _, field := range funcDecl.Type.Params.List {
-				// 获取参数类型
-				typeExpr := field.Type
-				typeStr := ""
-				switch t := typeExpr.(type) {
-				case *ast.Ident:
-					typeStr = t.Name
-				case *ast.ArrayType:
-					if ident, ok := t.Elt.(*ast.Ident); ok {
-						typeStr = "[]" + ident.Name
-					}
-				}
-
-				// 处理每个参数名
-				for _, name := range field.Names {
-					info.Args = append(info.Args, struct {
-						Name string
-						Type string
-					}{
-						Name: name.Name,
-						Type: typeStr,
-					})
-				}
-			}
-		}
-
-		abi[info.Name] = info
-	}
-
-	return abi, nil
 }

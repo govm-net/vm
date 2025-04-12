@@ -60,7 +60,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(0), ctx.Balance(addr2))
 
 	// Test transfer
-	err := ctx.Transfer(addr1, addr2, 500)
+	err := ctx.Transfer(core.ZeroAddress, addr1, addr2, 500)
 	require.NoError(t, err)
 
 	// Verify transfer result
@@ -68,7 +68,7 @@ func TestBalanceTransfer(t *testing.T) {
 	assert.Equal(t, uint64(500), ctx.Balance(addr2))
 
 	// Test insufficient balance
-	err = ctx.Transfer(addr1, addr2, 1000)
+	err = ctx.Transfer(core.ZeroAddress, addr1, addr2, 1000)
 	assert.Error(t, err)
 }
 
@@ -122,7 +122,7 @@ func TestGasOperations(t *testing.T) {
 	ctx := setupTestContext()
 
 	// Test initial gas state
-	assert.Equal(t, int64(0), ctx.GetGas())
+	assert.Equal(t, int64(10000000), ctx.GetGas())
 
 	// Test setting gas limit
 	ctx.SetGasLimit(1000)
@@ -133,10 +133,10 @@ func TestObjectOwnership(t *testing.T) {
 	ctx := setupTestContext()
 
 	// Set up test environment
-	contract := core.AddressFromString("0xcontract")
-	sender := core.AddressFromString("0xsender")
-	newOwner := core.AddressFromString("0xnewowner")
-	txHash := core.HashFromString("0xtx")
+	contract := core.AddressFromString("0x12345678")
+	sender := core.AddressFromString("0x234578")
+	newOwner := core.AddressFromString("0x326498")
+	txHash := core.HashFromString("0x134652")
 
 	// Set transaction context
 	ctx.WithTransaction(txHash)
@@ -146,7 +146,7 @@ func TestObjectOwnership(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test initial ownership
-	assert.Equal(t, sender, obj.Owner())
+	assert.Equal(t, contract, obj.Owner())
 
 	// Test setting new owner
 	err = obj.SetOwner(contract, sender, newOwner)
@@ -154,7 +154,7 @@ func TestObjectOwnership(t *testing.T) {
 	assert.Equal(t, newOwner, obj.Owner())
 
 	// Test unauthorized ownership change
-	unauthorized := core.AddressFromString("0xunauthorized")
+	unauthorized := core.AddressFromString("0x222222")
 	err = obj.SetOwner(contract, unauthorized, sender)
 	assert.Error(t, err)
 }

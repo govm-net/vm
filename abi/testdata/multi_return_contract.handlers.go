@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+func init() {
+	if false {
+		fmt.Println("init")
+		json.Marshal(nil)
+	}
+}
+
 type GetUserInfoParams struct {
 	Id string `json:"id,omitempty"`
 }
@@ -17,10 +24,8 @@ func handleGetUserInfo(params []byte) (any, error) {
 		}
 	}
 
-	// 调用原始函数
 	result0, result1, result2 := GetUserInfo(args.Id)
 
-	// 处理返回值
 	results := make([]any, 0)
 	results = append(results, result0)
 	results = append(results, result1)
@@ -41,10 +46,8 @@ func handleCreateOrderWithDetails(params []byte) (any, error) {
 		}
 	}
 
-	// 调用原始函数
 	result0, result1, result2 := CreateOrderWithDetails(args.Userid, args.Amount)
 
-	// 处理返回值
 	results := make([]any, 0)
 	results = append(results, result0)
 	results = append(results, result1)
@@ -64,10 +67,8 @@ func handleProcessUserAndOrder(params []byte) (any, error) {
 		}
 	}
 
-	// 调用原始函数
 	result0, result1, result2 := ProcessUserAndOrder(args.User)
 
-	// 处理返回值
 	results := make([]any, 0)
 	results = append(results, result0)
 	results = append(results, result1)

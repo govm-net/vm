@@ -24,9 +24,9 @@ func TestFunc(x int) int {
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.Enter("test", "TestFunc")
-	defer mock.Exit("test", "TestFunc")
-	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+	mock.Enter("0x12345678", "TestFunc")
+	defer mock.Exit("0x12345678", "TestFunc")
+	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
 	y := x + 1
 	return y
 }
@@ -59,9 +59,9 @@ var vm_cover_atomic_ = struct {
 import "github.com/govm-net/vm/mock"
 
 func TestFunc(x int) int {
-	mock.Enter("test", "TestFunc")
-	defer mock.Exit("test", "TestFunc")
-	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+	mock.Enter("0x12345678", "TestFunc")
+	defer mock.Exit("0x12345678", "TestFunc")
+	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
 	a := x + 1
 	b := a * 2
 	return b
@@ -96,14 +96,14 @@ var vm_cover_atomic_ = struct {
             import "github.com/govm-net/vm/mock"
             
             func TestFunc(x int) int {
-            	mock.Enter("test", "TestFunc")
-            	defer mock.Exit("test", "TestFunc")
-            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+            	mock.Enter("0x12345678", "TestFunc")
+            	defer mock.Exit("0x12345678", "TestFunc")
+            	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
             	if x > 0 {
-            		mock.ConsumeGas(vm_cover_atomic_.NumStmt[2])
+            		mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[2]))
             		return x
             	}
-            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[1])
+            	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[1]))
             	return -x
             }
             
@@ -142,9 +142,9 @@ var vm_cover_atomic_ = struct {
             import "fmt"
             
             func TestFunc(x int) int {
-            	mock.Enter("test", "TestFunc")
-            	defer mock.Exit("test", "TestFunc")
-            	mock.ConsumeGas(vm_cover_atomic_.NumStmt[0])
+            	mock.Enter("0x12345678", "TestFunc")
+            	defer mock.Exit("0x12345678", "TestFunc")
+            	mock.ConsumeGas(int64(vm_cover_atomic_.NumStmt[0]))
             	fmt.Println(x)
             	return x
             }
@@ -168,7 +168,7 @@ var vm_cover_atomic_ = struct {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := AddGasConsumption("test", []byte(tt.input))
+			got, err := AddGasConsumption("0x12345678", []byte(tt.input))
 			if err != nil {
 				t.Fatalf("AddGasConsumption() error = %v", err)
 				return

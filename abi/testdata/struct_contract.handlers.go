@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+func init() {
+	if false {
+		fmt.Println("init")
+		json.Marshal(nil)
+	}
+}
+
 type ProcessUserParams struct {
 	User *User `json:"user,omitempty"`
 }
@@ -17,7 +24,6 @@ func handleProcessUser(params []byte) (any, error) {
 		}
 	}
 
-	// 调用原始函数
 	result0 := ProcessUser(args.User)
 
 	return result0, nil
@@ -35,7 +41,6 @@ func handleCreateOrder(params []byte) (any, error) {
 		}
 	}
 
-	// 调用原始函数
 	result0 := CreateOrder(args.Order)
 
 	return result0, nil

@@ -9,42 +9,34 @@ WebAssembly 智能合约的完整生命周期包括以下阶段：
 ```mermaid
 flowchart TB
     A[编写Go合约] --> B[验证源码]
-    B --> C[编译为WebAssembly]
-    C --> D[部署到区块链]
-    D --> E1[创建默认Object]
-    E1 --> E2[初始化合约]
-    E2 --> F[执行合约函数]
+    B --> C[注入调用栈和gas信息]
+    C --> D[编译为WebAssembly]
+    D --> E[部署]
+    E --> F1[创建默认Object]
+    F1 --> F2[初始化合约]
+    F2 --> G[执行合约函数]
     
     style A fill:#d0f0c0
     style B fill:#d0f0c0
     style C fill:#d0f0c0
     style D fill:#c0d0f0
-    style E1 fill:#f0c0c0
-    style E2 fill:#f0d0c0
-    style F fill:#f0d0c0
+    style F1 fill:#f0c0c0
+    style F2 fill:#f0d0c0
+    style G fill:#f0d0c0
+
+    subgraph "代码注入"
+    C1[添加Enter/Exit调用] --> C2[注入gas消耗代码]
+    C2 --> C3[生成mock代码]
+    end
 ```
 
 ## 2. 合约编译流程
 
 Go 语言智能合约编译为 WebAssembly 的详细流程：
 
-### 2.1 源码接收与解压
+### 2.1 源码验证
 
-系统首先接收合约源码并检查是否使用了压缩格式：
-
-```go
-// 检查源码是否使用 GZIP 压缩
-if isGzipCompressed(code) {
-    code, err = decompressGzip(code)
-    if err != nil {
-        return nil, fmt.Errorf("failed to decompress contract code: %w", err)
-    }
-}
-```
-
-### 2.2 源码验证
-
-接下来，系统对合约源码进行严格验证：
+系统对合约源码进行严格验证：
 
 ```go
 // 验证合约源码
@@ -54,53 +46,68 @@ if err := maker.ValidateContract(code); err != nil {
 ```
 
 验证过程包含多重检查：
-- **导入检查**：确保合约只导入允许的包
-- **关键字检查**：禁止使用可能导致非确定性行为的 Go 关键字
-- **大小限制**：确保合约代码不超过配置的最大大小
+- **导入检查**：确保合约只导入允许的包（如 `github.com/govm-net/vm/core`）
+- **关键字检查**：禁止使用可能导致非确定性行为的 Go 关键字（如 `go`, `select`, `range`, `chan`, `recover`）
+- **注释检查**：禁止在注释中使用恶意命令（如 `go build`, `+build`, `//export` 等）
+- **大小限制**：确保合约代码不超过配置的最大大小（默认 1MB）
 - **结构检查**：验证合约包含至少一个导出（公开）函数
 - **语法检查**：确保 Go 代码语法正确
 
-### 2.3 合约信息提取
+### 2.2 合约信息提取
 
 验证通过后，系统使用 Go 的 AST（抽象语法树）分析工具提取关键信息：
 
 ```go
 // 提取包名和合约对外函数列表
-packageName, functions, err := maker.extractContractInfo(code)
+abiInfo, err := abi.ExtractABI(code)
 ```
 
 该步骤会：
 - 解析 Go 源码的包结构
 - 确定包名（package name）
 - 识别所有大写字母开头的函数作为导出函数
-- 自动收集所有导出函数的接口信息，无需开发者添加特殊注释
+- 自动收集所有导出函数的接口信息，包括：
+  - 函数名
+  - 参数列表（名称和类型）
+  - 返回值类型
 
-系统会自动按照 Go 语言的公共/私有规则识别导出函数：
-- 大写字母开头的函数自动被视为导出函数（对外可调用）
-- 小写字母开头的函数为私有函数（仅内部使用）
-- 无需开发者手动添加 `//export` 标记
-
-### 2.4 WASI 包装代码生成
+### 2.3 代码注入与包装
 
 系统会生成专用的包装代码，使 Go 合约能够与 WebAssembly 系统接口通信：
 
 ```go
-// 生成 WASI 接口包装代码
-wrapperCode := generateWASIWrapper(packageName, functions, code)
+// 生成处理函数
+handlerGenerator := abi.NewHandlerGenerator(abiInfo)
+handlerCode := handlerGenerator.GenerateHandlers()
+
+// 修改包名为main
+handlerCode = strings.Replace(handlerCode, "package "+abiInfo.PackageName, "package main", 1)
 ```
 
 包装代码提供：
 - 与 WebAssembly 主机系统的通信桥梁
 - 内存管理接口
 - 参数传递和结果返回机制
+- 函数分发表
+- 统一的合约入口函数
 
-### 2.5 编译环境准备
+### 2.4 编译环境准备
 
 在执行编译前，系统会创建完整的编译环境：
 
 ```go
-// 准备编译环境
-tempDir, err := prepareCompilationEnvironment(code, wrapperCode)
+// 创建临时目录
+tmpDir, err := os.MkdirTemp("", "vm-contract-*")
+if err != nil {
+    return nil, fmt.Errorf("failed to create temp dir: %w", err)
+}
+defer os.RemoveAll(tmpDir)
+
+// 创建go.mod文件
+goModContent := api.DefaultGoModGenerator("main", nil, nil)
+if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goModContent), 0644); err != nil {
+    return nil, fmt.Errorf("failed to write go.mod: %w", err)
+}
 ```
 
 这一步会：
@@ -109,18 +116,20 @@ tempDir, err := prepareCompilationEnvironment(code, wrapperCode)
 - 设置必要的依赖关系
 - 配置编译参数和环境变量
 
-### 2.6 TinyGo 编译
+### 2.5 TinyGo 编译
 
 准备就绪后，系统使用 TinyGo 编译器将 Go 代码编译为 WebAssembly 模块：
 
 ```go
 // 使用 TinyGo 编译为 WebAssembly
-wasmCode, err := compileWithTinyGo(tempDir, options.WASIOptions)
+cmd := exec.Command(api.Builder, api.BuildParams...)
+cmd.Dir = tmpDir
+output, err := cmd.CombinedOutput()
 ```
 
 编译命令示例：
 ```bash
-tinygo build -o contract.wasm -target=wasi -opt=z -no-debug ./main.go
+tinygo build -o contract.wasm -target=wasi -opt=z -no-debug ./
 ```
 
 编译选项说明：
@@ -128,42 +137,42 @@ tinygo build -o contract.wasm -target=wasi -opt=z -no-debug ./main.go
 - `-opt=z`: 优化输出大小，减小 WASM 模块体积
 - `-no-debug`: 移除调试信息，进一步减小文件大小
 
-### 2.7 模块优化与验证
+### 2.6 模块优化与验证
 
-编译后，系统会验证生成的 WebAssembly 模块并可能进行进一步优化：
+编译后，系统会验证生成的 WebAssembly 模块：
 
 ```go
-// 验证和优化 WebAssembly 模块
-wasmCode, err = optimizeWasmModule(wasmCode)
+// 读取编译后的WASM文件
+wasmFile := filepath.Join(tmpDir, "contract.wasm")
+wasmCode, err := os.ReadFile(wasmFile)
 ```
 
 这一步确保：
 - WASM 模块格式正确
 - 模块结构完整且有效
 - 必要的导出函数存在
-- 可能的性能和大小优化已应用
+- 性能和大小优化已应用
 
-### 2.8 存储与注册
+### 2.7 存储与注册
 
 最后，系统将编译好的 WebAssembly 模块存储到指定位置并注册到系统中：
 
 ```go
-// 生成合约地址
-contractAddr := generateContractAddress(wasmCode)
+// 部署合约
+_, err = e.wazero_engine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
 
-// 存储到文件系统
-wasmPath := filepath.Join(config.WASIContractsDir, contractAddr.String()+".wasm")
-os.WriteFile(wasmPath, wasmCode, 0644)
-
-// 注册合约信息
-engine.contracts[contractAddr] = wasmPath
+// 保存合约ABI文件
+abiPath := filepath.Join(e.config.WASIContractsDir, fmt.Sprintf("%x.abi", contractAddr))
+if err := os.WriteFile(abiPath, abiJSON, 0644); err != nil {
+    return fmt.Errorf("failed to save contract ABI: %w", err)
+}
 ```
 
 ## 3. 合约部署流程
 
 ### 3.1 部署请求处理
 
-当系统接收到合约部署请求时，首先会处理源代码并检查部署选项：
+当系统接收到合约部署请求时，首先会验证部署选项并选择适当的处理方式：
 
 ```go
 // 处理合约部署请求
@@ -185,42 +194,45 @@ func (e *Engine) DeployWithOptions(code []byte, options DeployOptions) (vm.Addre
 
 ### 3.2 合约地址生成
 
-系统根据 WebAssembly 模块内容生成唯一的合约地址：
+系统根据 WebAssembly 模块内容和发送者地址生成唯一的合约地址：
 
 ```go
 // 生成合约地址
-func generateContractAddress(wasmCode []byte) vm.Address {
-    hash := sha256.Sum256(wasmCode)
-    var addr vm.Address
-    copy(addr[:], hash[:20]) // 使用哈希的前20字节作为地址
-    return addr
-}
+contractAddr := api1.DefaultContractAddressGenerator(wasmCode, sender)
 ```
 
-### 3.3 元数据存储
+### 3.3 合约部署
 
-系统存储合约元数据，包括版本、发布者、ABI接口和权限信息：
+系统使用 wazero 引擎部署合约：
 
 ```go
-// 存储合约元数据
-func (e *Engine) storeContractMetadata(addr vm.Address, metadata ContractMetadata) error {
-    // 序列化元数据
-    metadataBytes, err := json.Marshal(metadata)
-    if err != nil {
-        return err
+// 部署合约
+func (vm *WazeroVM) DeployContractWithAddress(ctx types.BlockchainContext, wasmCode []byte, sender types.Address, contractAddr types.Address) (types.Address, error) {
+    // 验证WASM代码
+    if len(wasmCode) == 0 {
+        return types.Address{}, errors.New("contract code cannot be empty")
     }
-    
-    // 构造元数据键
-    key := fmt.Sprintf("contract:%s:metadata", addr.String())
-    
-    // 存储到数据库
-    return e.db.Put([]byte(key), metadataBytes)
+
+    // 创建合约对象
+    var id core.ObjectID
+    copy(id[:], contractAddr[:])
+    ctx.CreateObjectWithID(contractAddr, id)
+
+    // 如果指定了合约目录，保存到文件
+    if vm.contractDir != "" {
+        contractPath := filepath.Join(vm.contractDir, fmt.Sprintf("%x", contractAddr)+".wasm")
+        if err := os.WriteFile(contractPath, wasmCode, 0644); err != nil {
+            return types.Address{}, fmt.Errorf("failed to store contract code: %w", err)
+        }
+    }
+
+    return contractAddr, nil
 }
 ```
 
 ### 3.4 默认Object的创建
 
-系统会在合约部署时自动为合约创建一个默认的存储对象，该对象有真实的唯一ID，但可以通过空ObjectID访问：
+系统在合约部署时自动创建默认存储对象：
 
 ```go
 // 为合约创建默认存储对象
@@ -249,7 +261,7 @@ func (e *Engine) createDefaultObject(contractAddr vm.Address) error {
 ```
 
 这个默认Object具有以下特性：
-- 具有真实的唯一ID，但系统会注册特殊映射，使其可通过空ObjectID访问，默认是直接使用合约地址转换而成
+- 具有真实的唯一ID，但合约可通过空ObjectID访问
 - 初始所有者设置为合约地址本身
 - 可以像其他对象一样转移所有权
 - 部署后立即可用，无需合约显式创建
@@ -854,7 +866,7 @@ mock 模块采用轻量级设计，只记录必要的执行信息：
 
 在跨合约调用中，系统使用调用者信息传递机制：
 1. ctx.Call：host通过创建新的执行环境engine，wasi->host传递sender(合约地址)、contract.function(args)
-2. package.function: 通过import的方式，直接引用了目标合约的代码，会被编译到同一个“.wasm”执行文件里，这种是通过在public function里注入mock.Enter/Exit的方式记录
+2. package.function: 通过import的方式，直接引用了目标合约的代码，会被编译到同一个".wasm"执行文件里，这种是通过在public function里注入mock.Enter/Exit的方式记录
 
 ```go
 // 在合约内实现的跨合约调用
