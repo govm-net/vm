@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/interfaces"
 	"github.com/govm-net/vm/mock"
 )
 
@@ -18,6 +19,9 @@ import (
 type Manager struct {
 	rootDir string // Root directory for code
 }
+
+// Ensure Manager implements the interfaces.CodeRepository interface
+var _ interfaces.CodeRepository = (*Manager)(nil)
 
 // ContractCode represents contract code information
 type ContractCode struct {
@@ -102,8 +106,21 @@ func (m *Manager) RegisterCode(address core.Address, code []byte) error {
 }
 
 // GetCode retrieves contract code
-func (m *Manager) GetCode(address core.Address) (*ContractCode, error) {
-	return m.loadContractCode(address)
+func (m *Manager) GetCode(address core.Address) (*interfaces.ContractCode, error) {
+	code, err := m.loadContractCode(address)
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换为接口定义的 ContractCode 类型
+	return &interfaces.ContractCode{
+		Address:      code.Address,
+		OriginalCode: code.OriginalCode,
+		InjectedCode: code.InjectedCode,
+		Dependencies: code.Dependencies,
+		UpdateTime:   code.UpdateTime.String(), // 转换为字符串
+		Hash:         code.Hash,
+	}, nil
 }
 
 // GetInjectedCode retrieves code after gas information injection

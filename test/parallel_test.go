@@ -8,10 +8,11 @@ import (
 
 	_ "embed"
 
+	"github.com/govm-net/vm" // 修复导入路径
 	_ "github.com/govm-net/vm/context/db"
 	_ "github.com/govm-net/vm/context/memory"
 	"github.com/govm-net/vm/core"
-	"github.com/govm-net/vm/vm"
+	"github.com/govm-net/vm/interfaces" // 添加接口包导入
 )
 
 //go:embed testdata/counter.go
@@ -30,7 +31,7 @@ func BenchmarkParallelExecution(b *testing.B) {
 	}()
 
 	// 创建VM引擎配置
-	config := &vm.Config{
+	config := &interfaces.Config{ // 使用接口中的Config类型
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: wasmDir,
 		CodeManagerDir:   "code",

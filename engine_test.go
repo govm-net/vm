@@ -10,6 +10,7 @@ import (
 
 	"github.com/govm-net/vm/context/memory"
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/interfaces"
 )
 
 //go:embed testdata/counter_contract.go
@@ -24,7 +25,7 @@ func TestNewEngine(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// 创建配置
-	config := &Config{
+	config := &interfaces.Config{
 		MaxContractSize:  1024 * 1024, // 1MB
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),
@@ -55,7 +56,7 @@ func TestEngine_DeployAndExecuteContract(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// 创建配置
-	config := &Config{
+	config := &interfaces.Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),
@@ -138,7 +139,7 @@ func TestEngine_DeployAndExecuteContract2(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// 创建配置
-	config := &Config{
+	config := &interfaces.Config{
 		MaxContractSize:  1024 * 1024,
 		WASIContractsDir: filepath.Join(tmpDir, "contracts"),
 		CodeManagerDir:   filepath.Join(tmpDir, "code"),

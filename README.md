@@ -35,6 +35,8 @@ This project is a lightweight, WebAssembly-based smart contract virtual machine 
 - Gas consumption tracking and management
 - Contract code repository with versioning
 - ABI support for contract interfaces
+- Modular design with replaceable components
+- Customizable engine with options pattern
 
 ## Dependencies
 
@@ -201,6 +203,29 @@ func main() {
 }
 ```
 
+### Using Custom Modules
+
+The VM engine supports custom modules through the options pattern:
+
+```go
+// Create configuration
+config := &interfaces.Config{
+    MaxContractSize:  1024 * 1024, // 1MB
+    WASIContractsDir: "./contracts",
+    CodeManagerDir:   "./code",
+    ContextType:      "memory",
+}
+
+// Create custom context
+customContext := memory.NewBlockchainContext(nil)
+
+// Create engine with custom modules
+engine, err := vm.NewEngine(config, 
+    vm.WithContext(customContext),
+    // Add other custom modules as needed
+)
+```
+
 ## Virtual Machine Architecture
 
 The VM architecture consists of several key components:
@@ -241,6 +266,7 @@ The main VM engine (`vm.Engine`) provides:
 - State management
 - Gas tracking
 - Multiple execution contexts
+- Modular design with replaceable components
 
 ### Context
 

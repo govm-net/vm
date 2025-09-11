@@ -11,6 +11,7 @@ import (
 	"github.com/govm-net/vm/compiler"
 	"github.com/govm-net/vm/context"
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/interfaces"
 	"github.com/govm-net/vm/repository"
 	"github.com/govm-net/vm/types"
 	"github.com/govm-net/vm/wasi"
@@ -18,25 +19,54 @@ import (
 
 // Engine is responsible for contract deployment and execution
 type Engine struct {
-	config        *Config
-	maker         *compiler.Maker
-	wazero_engine *wasi.WazeroVM
-	codeManager   *repository.Manager
-	ctx           types.BlockchainContext // Blockchain context
+	config      *interfaces.Config
+	compiler    interfaces.Compiler
+	wasiEngine  interfaces.WASIEngine
+	codeManager interfaces.CodeRepository
+	ctx         types.BlockchainContext // Blockchain context
 }
 
-// Config represents engine configuration
-type Config struct {
-	// Contract related configuration
-	MaxContractSize  uint64         // Maximum contract size
-	WASIContractsDir string         // WASI contract storage directory
-	CodeManagerDir   string         // Code manager storage directory
-	ContextType      string         // Blockchain context type
-	ContextParams    map[string]any // Blockchain context parameters
+// EngineOptions 定义引擎选项
+type EngineOptions struct {
+	Compiler    interfaces.Compiler
+	WASIEngine  interfaces.WASIEngine
+	CodeManager interfaces.CodeRepository
+	Context     types.BlockchainContext
+}
+
+// EngineOption 定义引擎选项函数
+type EngineOption func(*EngineOptions)
+
+// WithCompiler 设置编译器
+func WithCompiler(compiler interfaces.Compiler) EngineOption {
+	return func(opts *EngineOptions) {
+		opts.Compiler = compiler
+	}
+}
+
+// WithWASIEngine 设置WASI引擎
+func WithWASIEngine(engine interfaces.WASIEngine) EngineOption {
+	return func(opts *EngineOptions) {
+		opts.WASIEngine = engine
+	}
+}
+
+// WithCodeManager 设置代码管理器
+func WithCodeManager(manager interfaces.CodeRepository) EngineOption {
+	return func(opts *EngineOptions) {
+		opts.CodeManager = manager
+	}
+}
+
+// WithContext 设置区块链上下文
+func WithContext(ctx types.BlockchainContext) EngineOption {
+	return func(opts *EngineOptions) {
+		opts.Context = ctx
+	}
 }
 
 // NewEngine creates a new contract engine
-func NewEngine(config *Config) (*Engine, error) {
+func NewEngine(config *interfaces.Config, opts ...EngineOption) (interfaces.Engine, error) {
 	// Ensure configuration is valid
 	if err := validateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -47,37 +77,56 @@ func NewEngine(config *Config) (*Engine, error) {
 		return nil, fmt.Errorf("failed to create contracts directory: %w", err)
 	}
 
-	// Create Maker instance
-	contractConfig := api.DefaultContractConfig()
-	contractConfig.MaxCodeSize = uint64(config.MaxContractSize)
-	maker := compiler.NewMaker(contractConfig)
-
-	// Create WazeroEngine instance
-	wazero_engine, err := wasi.NewWazeroVM(config.WASIContractsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create wazero engine: %w", err)
+	// Apply options
+	options := &EngineOptions{}
+	for _, opt := range opts {
+		opt(options)
 	}
 
-	// Create code manager
-	codeManager, err := repository.NewManager(config.CodeManagerDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create code manager: %w", err)
+	if options.Compiler == nil {
+		// Create Compiler instance if not provided
+		contractConfig := api.DefaultContractConfig()
+		contractConfig.MaxCodeSize = config.MaxContractSize
+		options.Compiler = compiler.NewMaker(contractConfig)
 	}
-	ctx, err := context.Get(context.ContextType(config.ContextType), config.ContextParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get default context: %w", err)
+
+	// Create WASIEngine instance if not provided
+	if options.WASIEngine == nil {
+		var err error
+		options.WASIEngine, err = wasi.NewWazeroVM(config.WASIContractsDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create wasi engine: %w", err)
+		}
+	}
+
+	// Create code manager if not provided
+	if options.CodeManager == nil {
+		var err error
+		options.CodeManager, err = repository.NewManager(config.CodeManagerDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create code manager: %w", err)
+		}
+	}
+
+	// Create context if not provided
+	if options.Context == nil {
+		var err error
+		options.Context, err = context.Get(context.ContextType(config.ContextType), config.ContextParams)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get default context: %w", err)
+		}
 	}
 
 	return &Engine{
-		config:        config,
-		maker:         maker,
-		wazero_engine: wazero_engine,
-		codeManager:   codeManager,
-		ctx:           ctx,
+		config:      config,
+		compiler:    options.Compiler,
+		wasiEngine:  options.WASIEngine,
+		codeManager: options.CodeManager,
+		ctx:         options.Context,
 	}, nil
 }
 
-func (e *Engine) WithContext(ctx types.BlockchainContext) *Engine {
+func (e *Engine) WithContext(ctx types.BlockchainContext) interfaces.Engine {
 	e.ctx = ctx
 	return e
 }
@@ -87,7 +136,7 @@ func (e *Engine) GetContext() types.BlockchainContext {
 }
 
 // validateConfig validates the configuration
-func validateConfig(config *Config) error {
+func validateConfig(config *interfaces.Config) error {
 	if config == nil {
 		return fmt.Errorf("config is nil")
 	}
@@ -106,7 +155,7 @@ func validateConfig(config *Config) error {
 // DeployContractWithAddress deploys a contract with specified address
 func (e *Engine) DeployContractWithAddress(code []byte, contractAddr core.Address) error {
 	// Validate contract code
-	if err := e.maker.ValidateContract(code); err != nil {
+	if err := e.compiler.ValidateContract(code); err != nil {
 		return fmt.Errorf("contract validation failed: %w", err)
 	}
 
@@ -117,35 +166,35 @@ func (e *Engine) DeployContractWithAddress(code []byte, contractAddr core.Addres
 	}
 
 	// Parse contract code to get ABI information
-	abi, err := abi.ExtractABI(code)
+	abiInfo, err := abi.ExtractABI(code)
 	if err != nil {
 		return fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
 	// If there are no external functions in ABI, no need to compile to wasm, it might just be a public module
-	if len(abi.Functions) == 0 {
+	if len(abiInfo.Functions) == 0 {
 		return nil
 	}
 
-	// Add gas consumption
-	code, err = e.codeManager.GetInjectedCode(contractAddr)
+	// Get injected code
+	injectedCode, err := e.codeManager.GetInjectedCode(contractAddr)
 	if err != nil {
 		return fmt.Errorf("failed to get contract code: %w", err)
 	}
 
 	// Compile contract
-	wasmCode, err := e.maker.CompileContract(code)
+	wasmCode, err := e.compiler.CompileContract(injectedCode)
 	if err != nil {
 		return fmt.Errorf("contract compilation failed: %w", err)
 	}
 
 	// Deploy contract
-	_, err = e.wazero_engine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
+	_, err = e.wasiEngine.DeployContractWithAddress(e.ctx, wasmCode, core.ZeroAddress, contractAddr)
 	if err != nil {
 		return fmt.Errorf("contract deployment failed: %w", err)
 	}
 
 	// Convert ABI to JSON
-	abiJSON, err := json.MarshalIndent(abi, "", "  ")
+	abiJSON, err := json.MarshalIndent(abiInfo, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal ABI: %w", err)
 	}
@@ -166,7 +215,7 @@ func (e *Engine) DeployContract(code []byte) (core.Address, error) {
 }
 
 func (e *Engine) DeleteContract(contractAddr core.Address) {
-	e.wazero_engine.DeleteContract(e.ctx, contractAddr)
+	e.wasiEngine.DeleteContract(e.ctx, contractAddr)
 }
 
 // ExecuteContract executes a contract function
@@ -216,16 +265,35 @@ func (e *Engine) ExecuteContract(contractAddr core.Address, function string, arg
 	return e.Execute(contractAddr, function, argsBytes)
 }
 
-// ExecuteContract executes a contract function with raw parameters, parameters are json.marshal(map[string]any)
+// Execute executes a contract function with raw parameters, parameters are json.marshal(map[string]any)
 func (e *Engine) Execute(contractAddr core.Address, function string, args []byte) (interface{}, error) {
 	// Execute contract function
-	return e.wazero_engine.ExecuteContract(e.ctx, contractAddr, function, args)
+	return e.wasiEngine.ExecuteContract(e.ctx, contractAddr, function, args)
 }
 
 // Close closes the engine
 func (e *Engine) Close() error {
-	if err := e.wazero_engine.Close(); err != nil {
-		return fmt.Errorf("failed to close wazero engine: %w", err)
+	if err := e.wasiEngine.Close(); err != nil {
+		return fmt.Errorf("failed to close wasi engine: %w", err)
 	}
 	return nil
+}
+
+// Default constructors for built-in implementations
+func newCompiler(config api.ContractConfig) interfaces.Compiler {
+	// This would import the compiler package, but we'll use a factory pattern instead
+	// For now, we'll return a placeholder
+	return nil
+}
+
+func newWASIEngine(contractDir string) (interfaces.WASIEngine, error) {
+	// This would import the wasi package, but we'll use a factory pattern instead
+	// For now, we'll return a placeholder
+	return nil, nil
+}
+
+func newCodeRepository(rootDir string) (interfaces.CodeRepository, error) {
+	// This would import the repository package, but we'll use a factory pattern instead
+	// For now, we'll return a placeholder
+	return nil, nil
 }

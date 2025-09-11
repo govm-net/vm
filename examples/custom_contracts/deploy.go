@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/govm-net/vm"
 	"github.com/govm-net/vm/context"
 	_ "github.com/govm-net/vm/context/db"
 	_ "github.com/govm-net/vm/context/memory"
-	"github.com/govm-net/vm/vm"
+	"github.com/govm-net/vm/interfaces"
 )
 
 func runDeploy(sourceFile, repoDir, wasmDir string) error {
@@ -47,7 +48,7 @@ func runDeploy(sourceFile, repoDir, wasmDir string) error {
 	}
 
 	// 创建VM引擎配置
-	config := &vm.Config{
+	config := &interfaces.Config{
 		MaxContractSize:  1024 * 1024, // 1MB
 		CodeManagerDir:   repoDir,
 		WASIContractsDir: wasmDir,

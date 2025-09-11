@@ -1,4 +1,5 @@
-package countercontract
+// 基于wasm包装层的简单计数器合约示例
+package testdata
 
 import (
 	"github.com/govm-net/vm/core"

@@ -12,6 +12,7 @@ import (
 
 	api1 "github.com/govm-net/vm/api"
 	"github.com/govm-net/vm/core"
+	"github.com/govm-net/vm/interfaces"
 	"github.com/govm-net/vm/types"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -33,6 +34,9 @@ type WazeroVM struct {
 	// env module
 	envModule api.Module
 }
+
+// Ensure WazeroVM implements the interfaces.WASIEngine interface
+var _ interfaces.WASIEngine = (*WazeroVM)(nil)
 
 // NewWazeroVM creates a new wazero virtual machine instance
 func NewWazeroVM(contractDir string) (*WazeroVM, error) {

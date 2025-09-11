@@ -15,12 +15,16 @@ import (
 
 	"github.com/govm-net/vm/abi"
 	"github.com/govm-net/vm/api"
+	"github.com/govm-net/vm/interfaces"
 )
 
 // Maker handles the compilation and validation of smart contracts.
 type Maker struct {
 	config api.ContractConfig
 }
+
+// Ensure Maker implements the interfaces.Compiler interface
+var _ interfaces.Compiler = (*Maker)(nil)
 
 //go:embed wasm/contract.go
 var WASM_CONTRACT_TEMPLATE string
