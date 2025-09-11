@@ -76,41 +76,21 @@ func init() {
 }
 
 //export call_host_set
-func call_host_set(funcID, argPtr, argLen, bufferPtr int32) int32 {
-	// This function is imported from the host environment in WebAssembly
-	// For non-WASM environments, we provide a placeholder implementation
-	return 0
-}
+func call_host_set(funcID, argPtr, argLen, bufferPtr int32) int32
 
 //export call_host_get_buffer
-func call_host_get_buffer(funcID, argPtr, argLen, bufferPtr int32) int32 {
-	// This function is imported from the host environment in WebAssembly
-	// For non-WASM environments, we provide a placeholder implementation
-	return 0
-}
+func call_host_get_buffer(funcID, argPtr, argLen, bufferPtr int32) int32
 
 // Some commonly used direct export functions for performance optimization
 
 //export get_block_height
-func get_block_height() int64 {
-	// This function is imported from the host environment in WebAssembly
-	// For non-WASM environments, we provide a placeholder implementation
-	return 0
-}
+func get_block_height() int64
 
 //export get_block_time
-func get_block_time() int64 {
-	// This function is imported from the host environment in WebAssembly
-	// For non-WASM environments, we provide a placeholder implementation
-	return 0
-}
+func get_block_time() int64
 
 //export get_balance
-func get_balance(addrPtr int32) uint64 {
-	// This function is imported from the host environment in WebAssembly
-	// For non-WASM environments, we provide a placeholder implementation
-	return 0
-}
+func get_balance(addrPtr int32) uint64
 
 //export get_buffer_address
 func get_buffer_address() int32 {

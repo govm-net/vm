@@ -144,6 +144,6 @@ func Call(contract Address, function string, args ...any) ([]byte, error) {
 }
 
 // Logging and events
-func Log(eventName string, keyValues ...interface{}) {
-	ctx.Log(eventName, keyValues...)
+func Log(eventName string, args ...any) {
+	ctx.Log(eventName, args...)
 }
