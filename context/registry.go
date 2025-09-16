@@ -15,6 +15,8 @@ const (
 	MemoryContextType ContextType = "memory"
 	// DBContextType represents database-backed context implementation
 	DBContextType ContextType = "db"
+
+	NetContextType ContextType = "network"
 )
 
 // ContextConstructor is a function type that creates a new BlockchainContext instance

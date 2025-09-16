@@ -1,0 +1,95 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+
+	"github.com/govm-net/vm/context"
+	_ "github.com/govm-net/vm/context/memory"
+	_ "github.com/govm-net/vm/context/network"
+
+	"github.com/govm-net/vm/core"
+	vm_contract "{{.PackageName}}"
+)
+
+func init() {
+	if false {
+		fmt.Println("init")
+		json.Marshal(nil)
+		core.Log("init")
+	}
+}
+
+{{range .Functions }}
+type {{.Name}}Params struct {
+	{{range .Inputs}}
+	{{.Name}} {{.Type}} `json:"{{.Name}}"`
+	{{end}}
+}
+{{end}}
+
+{{range .Functions }}
+func handle{{.Name}}(params []byte)([]byte,error){
+	var args {{.Name}}Params
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &args); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal params: %w", err)
+		}
+	}
+	{{with .Outputs}}{{join . ","}} := {{end}} vm_contract.{{.Name}}({{.ArgsString}})
+	{{with .Outputs}}
+	out := []any{
+		{{join . ","}}
+	}
+	if true{
+		d,_ := json.Marshal(out)
+		return d,nil
+	}
+	{{end}}
+
+	return nil, nil
+}
+{{end}}
+
+type CallParams struct {
+	Func string          `json:"func,omitempty"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+const ContractName = "{{.ContractAddress}}"
+
+func main() {
+	data := flag.String("data", "", "tx data")
+	ctxType := flag.String("ctx", "network", "context type")
+	flag.Parse()
+	if *data == "" {
+		panic("tx data is required")
+	}
+	ctx, err := context.Get(context.ContextType(*ctxType), map[string]any{})
+	if err != nil {
+		panic(fmt.Errorf("fail to get context: %w", err))
+	}
+	ctx1 := context.NewBlockchainContextAdapter(ctx, core.AddressFromString(ContractName))
+	core.SetContext(ctx1)
+	var param CallParams
+	err = json.Unmarshal([]byte(*data), &param)
+	if err != nil {
+		panic("invalid tx data")
+	}
+	var rst []byte
+	switch param.Func {
+	{{range .Functions}}
+	case "{{.Name}}":
+		rst,err = handle{{.Name}}(param.Args)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("{{.Name}} return: ",string(rst))
+		
+	{{end}}
+	default:
+		panic("invalid tx name")
+	}
+	ctx.Log(core.ZeroAddress,"tx_result",rst)
+}
